@@ -5,7 +5,6 @@ from chromadb.config import Settings
 from config import CHROMA_DIR, EMBEDDING_MODEL, OPENAI_API_KEY
 from openai import OpenAI
 
-
 # Validación de API Key
 if not OPENAI_API_KEY or OPENAI_API_KEY.strip() == "":
     raise ValueError(
@@ -40,8 +39,9 @@ def detect_doc_type(source_str: str) -> str:
 
     return "unknown"
 
-
 # Función principal de construcción del índice
+
+
 def build_index():
     print("Cargando chunks procesados...")
 
@@ -59,18 +59,25 @@ def build_index():
     # Crear cliente Chroma DB
     client_chroma = chromadb.PersistentClient(
         path=str(CHROMA_DIR),
-        settings=Settings(allow_reset=True)
+        settings=Settings(allow_reset=True),
     )
 
-    collection = client_chroma.get_or_create_collection(
+    # Intentamos borrar la colección previa para evitar duplicados
+    try:
+        client_chroma.delete_collection(name="bioactives_chunks")
+        print("Colección previa 'bioactives_chunks' eliminada.")
+    except Exception as e:
+        print(
+            "No había colección previa o no se pudo eliminar limpiamente "
+            f"(se continúa de todos modos): {e}"
+        )
+
+    # Creamos una colección nueva y vacía
+    collection = client_chroma.create_collection(
         name="bioactives_chunks",
-        metadata={"hnsw:space": "cosine"}
+        metadata={"hnsw:space": "cosine"},
     )
-
-    # Limpiar colección (evitar duplicados)
-    print("Limpiando colección existente para evitar duplicados...")
-    collection.delete(where={})
-    print("Colección vacía.")
+    print("Colección nueva 'bioactives_chunks' creada.")
 
     # Preparar datos
     ids = []
@@ -80,11 +87,11 @@ def build_index():
     print("Creando embeddings y metadatos...")
 
     for idx, row in df.iterrows():
-
         doc_id = row["doc_id"]
         text = row["text"]
         source = row["source"]
-        chunk_index = row.get("chunk_id", idx)
+        # Si existe chunk_id en el DF lo usamos, si no usamos el índice
+        chunk_index = row.get("chunk_index", row.get("chunk_id", idx))
 
         # Clasificación del documento
         doc_type = detect_doc_type(str(source))
@@ -107,7 +114,7 @@ def build_index():
 
     embedding_response = client.embeddings.create(
         model=EMBEDDING_MODEL,
-        input=documents
+        input=documents,
     )
 
     vectors = [e.embedding for e in embedding_response.data]
@@ -118,7 +125,7 @@ def build_index():
         ids=ids,
         embeddings=vectors,
         documents=documents,
-        metadatas=metadatas
+        metadatas=metadatas,
     )
 
     print("Índice vectorial creado correctamente.")
