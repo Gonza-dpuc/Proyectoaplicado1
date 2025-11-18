@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 import chromadb
 from chromadb.config import Settings
+from chromadb.utils import embedding_functions
 from config import CHROMA_DIR, EMBEDDING_MODEL, OPENAI_API_KEY
 from openai import OpenAI
 
@@ -54,20 +55,27 @@ def build_index():
         settings=Settings(allow_reset=True),
     )
 
+    # Embedding function consistente con retriever.py
+    ef = embedding_functions.OpenAIEmbeddingFunction(
+        api_key=OPENAI_API_KEY,
+        model_name=EMBEDDING_MODEL,
+    )
+
     # Limpiar colección previa
     try:
         client_chroma.delete_collection(name="bioactives_chunks")
-        print("Colección previa eliminada.")
+        print("Colección previa 'bioactives_chunks' eliminada.")
     except Exception as e:
         print(
             f"No había colección previa o no se pudo eliminar limpiamente: {e}")
 
-    # Crear colección nueva
+    # Crear colección nueva con el MISMO embedding_function que usa retriever.py
     collection = client_chroma.create_collection(
         name="bioactives_chunks",
         metadata={"hnsw:space": "cosine"},
+        embedding_function=ef,
     )
-    print("Colección nueva creada.")
+    print("Colección nueva 'bioactives_chunks' creada con embedding_function OpenAI.")
 
     ids = []
     docs = []
@@ -108,7 +116,7 @@ def build_index():
 
         print(f"Procesando batch {i} – {i + len(batch_docs)} / {len(docs)}")
 
-        # Crear los embeddings del batch
+        # Crear los embeddings del batch con OpenAI
         response = client.embeddings.create(
             model=EMBEDDING_MODEL,
             input=batch_docs,
