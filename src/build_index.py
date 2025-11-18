@@ -9,124 +9,120 @@ from openai import OpenAI
 if not OPENAI_API_KEY or OPENAI_API_KEY.strip() == "":
     raise ValueError(
         "ERROR: OPENAI_API_KEY no está configurado.\n"
-        "Crea un archivo .env en la raíz del proyecto y define:\n"
-        "OPENAI_API_KEY=tu_clave_aquí"
+        "Crea un archivo .env en la raíz del proyecto con:\n"
+        "OPENAI_API_KEY=tu_clave"
     )
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Clasificación de tipo de documento
 
-# Detectar tipo de documento
+
 def detect_doc_type(source_str: str) -> str:
-    """
-    Clasifica el documento según el nombre del archivo o la ruta.
-    Esto permite futuros filtros basados en tipo de evidencia.
-    """
+    s = source_str.lower()
 
-    source_lower = source_str.lower()
-
-    if "bioassay" in source_lower or "assay" in source_lower:
+    if "bioassay" in s or "assay" in s:
         return "bioassay"
-
-    if "pubmed" in source_lower or "abstract" in source_lower:
+    if "pubmed" in s or "abstract" in s:
         return "abstract"
-
-    if "compound" in source_lower or "dictionary" in source_lower:
+    if "compound" in s or "dictionary" in s:
         return "compound_info"
-
-    if "review" in source_lower or "metabolomics" in source_lower:
+    if "review" in s or "metabolomics" in s:
         return "literature_review"
 
     return "unknown"
 
-# Función principal de construcción del índice
+# Construcción del índice
 
 
 def build_index():
-    print("Cargando chunks procesados...")
 
+    print("Cargando chunks procesados...")
     chunks_path = Path("data/processed/chunks.parquet")
     if not chunks_path.exists():
         raise FileNotFoundError(
-            f"ERROR: No existe el archivo {chunks_path}.\n"
-            "Primero ejecuta:\n"
+            f"No existe {chunks_path}. Primero ejecuta:\n"
             "    python src/chunking.py"
         )
 
     df = pd.read_parquet(chunks_path)
     print(f"Chunks cargados: {len(df)}")
 
-    # Crear cliente Chroma DB
+    # Cliente Chroma
     client_chroma = chromadb.PersistentClient(
         path=str(CHROMA_DIR),
         settings=Settings(allow_reset=True),
     )
 
-    # Intentamos borrar la colección previa para evitar duplicados
+    # Limpiar colección previa
     try:
         client_chroma.delete_collection(name="bioactives_chunks")
-        print("Colección previa 'bioactives_chunks' eliminada.")
+        print("Colección previa eliminada.")
     except Exception as e:
         print(
-            "No había colección previa o no se pudo eliminar limpiamente "
-            f"(se continúa de todos modos): {e}"
-        )
+            f"No había colección previa o no se pudo eliminar limpiamente: {e}")
 
-    # Creamos una colección nueva y vacía
+    # Crear colección nueva
     collection = client_chroma.create_collection(
         name="bioactives_chunks",
         metadata={"hnsw:space": "cosine"},
     )
-    print("Colección nueva 'bioactives_chunks' creada.")
+    print("Colección nueva creada.")
 
-    # Preparar datos
     ids = []
-    documents = []
-    metadatas = []
+    docs = []
+    metas = []
 
-    print("Creando embeddings y metadatos...")
+    print("Preparando documentos y metadatos...")
 
     for idx, row in df.iterrows():
         doc_id = row["doc_id"]
         text = row["text"]
         source = row["source"]
-        # Si existe chunk_id en el DF lo usamos, si no usamos el índice
-        chunk_index = row.get("chunk_index", row.get("chunk_id", idx))
+        chunk_index = row.get("chunk_index", idx)
 
-        # Clasificación del documento
         doc_type = detect_doc_type(str(source))
 
         unique_id = f"{doc_id}_chunk_{chunk_index}"
 
         ids.append(unique_id)
-        documents.append(text)
-        metadatas.append(
+        docs.append(text)
+        metas.append(
             {
                 "doc_id": doc_id,
                 "source": source,
-                "chunk_index": int(chunk_index),
                 "doc_type": doc_type,
+                "chunk_index": int(chunk_index),
             }
         )
 
-    # Crear embeddings en batch
-    print("Generando embeddings...")
+    # EMBEDDINGS EN BATCHES
+    BATCH_SIZE = 200  # ajustable: 100, 200, 500
 
-    embedding_response = client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=documents,
-    )
+    print(f"Generando embeddings en batches de {BATCH_SIZE}...")
 
-    vectors = [e.embedding for e in embedding_response.data]
+    for i in range(0, len(docs), BATCH_SIZE):
+        batch_docs = docs[i: i + BATCH_SIZE]
+        batch_ids = ids[i: i + BATCH_SIZE]
+        batch_metas = metas[i: i + BATCH_SIZE]
 
-    print(f"Subiendo {len(vectors)} vectores al índice...")
+        print(f"Procesando batch {i} – {i + len(batch_docs)} / {len(docs)}")
 
-    collection.add(
-        ids=ids,
-        embeddings=vectors,
-        documents=documents,
-        metadatas=metadatas,
-    )
+        # Crear los embeddings del batch
+        response = client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=batch_docs,
+        )
+
+        vectors = [emb.embedding for emb in response.data]
+
+        # Agregar a Chroma
+        collection.add(
+            ids=batch_ids,
+            embeddings=vectors,
+            metadatas=batch_metas,
+            documents=batch_docs,
+        )
 
     print("Índice vectorial creado correctamente.")
 
