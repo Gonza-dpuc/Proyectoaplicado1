@@ -50,9 +50,16 @@ def load_pdf_files():
 def basic_clean(text: str) -> str:
     if not isinstance(text, str):
         text = str(text)
+
+    # Normalización básica
     text = text.replace("\r", " ")
     text = text.replace("\n", " ")
     text = " ".join(text.split())
+
+    # eliminar caracteres no válidos (surrogates, etc.)
+    # Encode/Decode con 'ignore' borra lo que no pueda representarse.
+    text = text.encode("utf-8", "ignore").decode("utf-8", "ignore")
+
     return text
 
 
