@@ -3,7 +3,7 @@ from pathlib import Path
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
-from config import CHROMA_DIR, EMBEDDING_MODEL, OPENAI_API_KEY
+from src.config import CHROMA_DIR, EMBEDDING_MODEL, OPENAI_API_KEY
 from openai import OpenAI
 
 # Validación de API Key

@@ -2,7 +2,8 @@ from pathlib import Path
 import json
 from statistics import mean
 
-from retriever import retrieve
+from src.retriever import retrieve
+
 
 # Ruta por defecto del conjunto de evaluación externo
 EVAL_PATH = Path("data/processed/eval_set.json")
