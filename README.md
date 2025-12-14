@@ -14,6 +14,32 @@ El sistema permite realizar **búsquedas semánticas** sobre PDFs técnicos, rec
 * **Búsqueda Semántica:** Capacidad de encontrar relaciones conceptuales, no solo palabras clave exactas.
 * **Filtrado Avanzado:** (En desarrollo) Soporte para filtros por propiedades químicas (ej. masa/carga `m/z`).
 
+## 🧠 Pipeline de Procesamiento (Chunking y Embeddings)
+
+El núcleo de este sistema RAG reside en cómo transformamos documentos científicos densos (PDFs) en información recuperable. Utilizamos un enfoque semántico para preservar el contexto de los hallazgos químicos.
+
+
+
+### 1. Estrategia de Chunking (Segmentación)
+En lugar de cortar el texto arbitrariamente por número de caracteres, utilizamos una estrategia de **Chunking Semántico**:
+
+* **Detección de Estructura:** El sistema analiza la estructura del PDF (encabezados, párrafos) para intentar mantener secciones lógicas juntas.
+* **Split Strategy:** `semantic-local`. Esto agrupa oraciones y párrafos que tienen una fuerte relación temática, evitando cortar una frase o una fórmula química a la mitad.
+* **Metadatos:** Cada fragmento conserva su referencia al archivo origen (`source_file`) y, cuando es posible, extrae propiedades específicas como valores de masa/carga (`m/z`) para permitir filtros técnicos futuros.
+
+### 2. Modelo de Embeddings
+Una vez fragmentado el texto, convertimos el lenguaje natural en vectores numéricos:
+
+* **Modelo:** `text-embedding-3-small` (OpenAI).
+* **Dimensión:** 1536 dimensiones.
+* **Justificación:** Este modelo ofrece un equilibrio óptimo entre latencia y precisión semántica, permitiendo capturar matices en descripciones de compuestos bioactivos mejor que modelos anteriores.
+
+### 3. Almacenamiento en Qdrant
+Los vectores resultantes se indexan en **Qdrant Cloud** bajo la colección `bioactives_v1`.
+* **Vector:** Representación matemática del contenido.
+* **Payload (Carga útil):** Contiene el texto original (`content`), nombre del archivo y metadatos extraídos.
+* **Índices:** Se ha configurado indexación especial para campos numéricos (como `mz`) para acelerar búsquedas por rango.
+
 ## 🛠️ Requisitos del Sistema
 
 * **Python:** 3.10 o superior.
