@@ -1,43 +1,62 @@
 import os
-from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Any
 from openai import OpenAI
-from src.models import ProcessedChunk
+import time
 
-class AbstractEmbedderAdapter(ABC):
-    """Target: Interfaz estandarizada que el sistema espera."""
-    @abstractmethod
-    def embed_chunks(self, chunks: List[ProcessedChunk]) -> List[List[float]]:
-        pass
+class OpenAIAdapter:
+    def __init__(self):
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("Falta OPENAI_API_KEY en .env")
+        self.client = OpenAI(api_key=api_key)
+        self.model = "text-embedding-3-small"
 
-class OpenAIAdapter(AbstractEmbedderAdapter):
-    """Adaptee: Conecta con la API de OpenAI."""
-    def __init__(self, model="text-embedding-3-small"):
-        # Asegúrate de tener OPENAI_API_KEY en tu .env
-        self.client = OpenAI() 
-        self.model = model
-
-    def embed_chunks(self, chunks: List[ProcessedChunk]) -> List[List[float]]:
-        print(f"-> [OpenAIAdapter] Generando embeddings para {len(chunks)} chunks...")
+    def embed_chunks(self, chunks: List[Any], batch_size: int = 100) -> List[List[float]]:
+        """
+        Genera embeddings para una lista de chunks.
         
-        # OpenAI permite lotes (batches). Preparamos solo el texto.
-        texts = [c.content.replace("\n", " ") for c in chunks]
+        MEJORA CRÍTICA:
+        Divide la lista de entrada en 'mini-lotes' (batch_size) más pequeños 
+        para evitar el error 'max_tokens_per_request' de OpenAI.
+        """
+        all_embeddings = []
+        total_chunks = len(chunks)
         
-        try:
-            response = self.client.embeddings.create(input=texts, model=self.model)
-            # Extraemos los vectores en orden
-            return [data.embedding for data in response.data]
-        except Exception as e:
-            print(f"Error en OpenAI Embedding: {e}")
+        # Si no hay chunks, retornamos lista vacía
+        if total_chunks == 0:
             return []
 
-class DummySparseAdapter(AbstractEmbedderAdapter):
-    """
-    Simulación de vectores dispersos (Sparse) para cumplir el requisito híbrido 
-    sin instalar librerías complejas todavía (como Pinecone-text o Splade).
-    """
-    def embed_chunks(self, chunks: List[ProcessedChunk]) -> List[List[float]]:
-        # Retorna vectores vacíos o aleatorios solo para que el código no rompa.
-        # En producción, aquí iría BM25.
-        vector_size = 1536 # Debe coincidir o ser manejado por Qdrant
-        return [[0.0] * vector_size for _ in chunks]
+        print(f"   🧠 [Adapter] Procesando {total_chunks} chunks en mini-lotes de {batch_size}...")
+
+        # Procesamos en grupos pequeños (ej: de 100 en 100)
+        for i in range(0, total_chunks, batch_size):
+            # Recorte del lote actual
+            mini_batch = chunks[i : i + batch_size]
+            
+            # Extraer solo el texto
+            texts = [c.content for c in mini_batch]
+            
+            # Limpieza básica: OpenAI falla si el string está vacío
+            texts = [t if t else " " for t in texts]
+
+            try:
+                # Llamada a la API (ahora segura por tamaño)
+                response = self.client.embeddings.create(
+                    input=texts,
+                    model=self.model
+                )
+                
+                # Extraer vectores y agregarlos a la lista principal
+                batch_embeddings = [data.embedding for data in response.data]
+                all_embeddings.extend(batch_embeddings)
+                
+                # Opcional: Pequeña pausa para no saturar Rate Limits (RPM)
+                time.sleep(0.1)
+                
+            except Exception as e:
+                print(f"❌ Error en mini-lote {i}-{i+batch_size}: {e}")
+                # En caso de error, podríamos lanzar la excepción o intentar reintentar.
+                # Para este script, lanzamos para detener y revisar.
+                raise e
+
+        return all_embeddings
