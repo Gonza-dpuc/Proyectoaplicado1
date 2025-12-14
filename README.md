@@ -1,72 +1,109 @@
-BioActives RAG - Baseline (Grupo 5)
-===================================
+# 🧬 Sistema RAG para Análisis de Compuestos Bioactivos
 
-Pipeline RAG ligero para recuperar informacion sobre compuestos bioactivos. Usa OpenAI embeddings, guarda el indice en ChromaDB y expone una app en Streamlit para probar la recuperacion y ver metricas de Precision@k y Recall@k.
+Este proyecto implementa un sistema de **Generación Aumentada por Recuperación (RAG)** diseñado para procesar, indexar y consultar literatura científica relacionada con farmacología y nutracéuticos (específicamente bayas chilenas como Maqui y Murta).
 
-## Requisitos rapidos
-- Python 3.10+ recomendado
-- Cuenta de OpenAI con clave para embeddings (`text-embedding-3-small`)
-- pip y un entorno virtual (opcional pero sugerido)
+El sistema permite realizar **búsquedas semánticas** sobre PDFs técnicos, recuperando fragmentos relevantes basados en vectores de embeddings.
 
-## Instalacion
-1) Crear y activar entorno virtual (opcional):
-```
-python -m venv .venv
-.venv\Scripts\activate
-```
-2) Instalar dependencias:
-```
-pip install -r requirements.txt
-```
-3) Crear archivo `.env` en la raiz con tu clave:
-```
-OPENAI_API_KEY=tu_clave
-```
-4) Colocar los archivos fuente (PDF, CSV, TXT) en `data/raw/`.
 
-## Flujo del pipeline (CLI)
-Ejecuta en este orden para construir el indice vectorial:
-```
-python -m src.ingest            # Lee data/raw y genera data/processed/corpus.parquet
-python -m src.chunking          # Parte los documentos en chunks -> data/processed/chunks.parquet
-python -m src.build_index       # Crea el indice Chroma en chroma_db_bioactives/
-python -m src.generate_eval_set # Arma data/processed/eval_set.json con queries de prueba
-```
 
-## App Streamlit
-Arranca la UI con:
-```
-streamlit run app_streamlit.py
-```
-Que hace la app:
-- En la primera carga corre el pipeline completo (si no existe).
-- Sidebar con Precision@k y Recall@k calculados sobre `data/processed/eval_set.json`.
-- Boton para reinicializar todo el pipeline.
-- Busqueda libre sobre el indice (top-k configurable) con metadatos del chunk recuperado.
+## 🚀 Características Principales
 
-## Evaluacion rapida
-Puedes calcular metricas desde consola:
-```
-python -m src.benchmark     # Usa eval_set.json o el fallback interno (k=5 por defecto)
-```
-Para cambiar k, ajusta `eval_metrics_at_k` en `src/benchmark.py` o usa directamente `eval_precision_at_k` y `eval_recall_at_k` en tus scripts (son las mismas funciones que consume la app).
+* **Ingesta Inteligente:** Procesa archivos PDF, extrayendo texto y metadatos.
+* **Vectorización:** Utiliza modelos de OpenAI (`text-embedding-3-small`) para generar embeddings de alta calidad.
+* **Base de Datos Vectorial:** Integración robusta con **Qdrant Cloud**.
+* **Búsqueda Semántica:** Capacidad de encontrar relaciones conceptuales, no solo palabras clave exactas.
+* **Filtrado Avanzado:** (En desarrollo) Soporte para filtros por propiedades químicas (ej. masa/carga `m/z`).
 
-## Estructura principal
-- `app_streamlit.py`             : UI Streamlit y orquestacion de pipeline/metricas.
-- `src/ingest.py`                : Lee PDFs, CSV y TXT de `data/raw` y los limpia.
-- `src/chunking.py`              : Divide en chunks con solapamiento y metadatos.
-- `src/build_index.py`           : Genera embeddings OpenAI y crea la coleccion Chroma.
-- `src/retriever.py`             : Funciones de consulta contra el indice persistente.
-- `src/generate_eval_set.py`     : Crea queries de evaluacion y doc_ids relevantes.
-- `src/benchmark.py`             : Precision@k y Recall@k (macro) sobre el eval set.
-- `src/debug_chroma.py`          : Lista colecciones almacenadas en `chroma_db_bioactives/`.
+## 🛠️ Requisitos del Sistema
 
-## Directorios y artefactos
-- `data/raw/`         : Entrada (PDF, CSV, TXT).
-- `data/processed/`   : Salida intermedia (`corpus.parquet`, `chunks.parquet`, `eval_set.json`).
-- `chroma_db_bioactives/` : Indice vectorial persistente usado por la app y el retriever.
+* **Python:** 3.10 o superior.
+* **Cuenta Qdrant Cloud:** Un cluster activo.
+* **OpenAI API Key:** Créditos disponibles para embeddings.
 
-## Notas y tips
-- Si cambias el contenido de `data/raw`, vuelve a correr todo el pipeline para regenerar chunks e indice.
-- Las metricas dependen del `eval_set.json`; ajusta las queries o doc_ids relevantes segun tu coleccion.
-- Si la app no encuentra la coleccion, ejecuta de nuevo `python -m src.build_index` o usa `python -m src.debug_chroma` para revisar las colecciones existentes.
+## 📦 Instalación
+
+1.  **Clonar el repositorio:**
+    ```bash
+    git clone <URL_DEL_REPO>
+    cd Proyectoaplicado1
+    ```
+
+2.  **Crear entorno virtual:**
+    ```bash
+    # Windows
+    python -m venv .venv
+    .venv\Scripts\activate
+
+    # Mac/Linux
+    python3 -m venv .venv
+    source .venv/bin/activate
+    ```
+
+3.  **Instalar dependencias:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+## ⚙️ Configuración (.env)
+
+⚠️ **IMPORTANTE:** La configuración de la conexión es crítica. Crea un archivo `.env` en la raíz y sigue este formato exacto para evitar errores de DNS (`getaddrinfo failed`).
+
+```env
+# API Keys
+OPENAI_API_KEY=sk-tu-clave-aqui...
+QDRANT_API_KEY=tu-api-key-de-qdrant...
+
+# URL de Qdrant Cloud
+# NOTA: No incluir el puerto (:6333) al final. Solo el host y protocolo.
+# Incorrecto: [https://xyz.aws.cloud.qdrant.io:6333](https://xyz.aws.cloud.qdrant.io:6333)
+# Correcto:   [https://xyz.aws.cloud.qdrant.io](https://xyz.aws.cloud.qdrant.io)
+QDRANT_URL=[https://tu-cluster-id.region.aws.cloud.qdrant.io](https://tu-cluster-id.region.aws.cloud.qdrant.io)
+
+# Configuración de la Colección
+QDRANT_COLLECTION_NAME=bioactives_v1
+
+#🏃‍♂️ Uso
+#1. Ingesta de Datos (Carga de PDFs)
+
+Este script lee los PDFs de data/raw/, genera los embeddings y los sube a Qdrant.
+Bash
+
+python scripts/ingest.py
+
+#2. Prueba de Búsqueda
+
+Verifica que el sistema puede recuperar información relevante mediante una consulta de prueba.
+Bash
+
+python scripts/test_search.py
+
+#📂 Estructura del Proyecto
+Plaintext
+
+Proyectoaplicado1/
+├── data/
+│   ├── raw/                 # PDFs originales
+│   └── processed/           # Datos intermedios (chunks)
+├── scripts/
+│   ├── ingest.py            # Pipeline de carga y vectorización
+│   └── test_search.py       # Script de validación de búsqueda
+├── src/
+│   ├── qdrant_impl.py       # Lógica de conexión y manejo de Qdrant (Bridge Pattern)
+│   ├── vector_store_service.py # Lógica de negocio (Service Layer)
+│   └── models.py            # Definiciones de datos (Pydantic)
+├── .env                     # Variables de entorno (NO SUBIR A GITHUB)
+├── .gitignore               # Archivos ignorados por Git
+└── requirements.txt         # Dependencias del proyecto
+
+#🔧 Solución de Problemas Comunes
+Error: httpcore.ConnectError: [Errno 11001] getaddrinfo failed
+
+    Causa: La variable QDRANT_URL en el .env tiene el puerto :6333 al final o espacios en blanco invisibles.
+
+    Solución: Edita el .env, borra el puerto y asegúrate de eliminar espacios al final de la línea. El código en src/qdrant_impl.py incluye limpieza automática, pero es mejor tener el .env limpio.
+
+Error: AttributeError: 'QdrantClient' object has no attribute 'search'
+
+    Causa: Estás usando una versión reciente de qdrant-client (v1.10+) que eliminó el método .search().
+
+    Solución: El proyecto ya implementa query_points() que es compatible con las nuevas versiones. Asegúrate de tener las dependencias actualizadas.
