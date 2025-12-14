@@ -1,2 +1,22 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Archivos de Python compilados
+__pycache__/
+*.pyc
+
+# Variables de entorno (¡MUY IMPORTANTE POR SEGURIDAD!)
 .env
-*.env
+
+# Configuración de IDE
+.vscode/
+.idea/
+
+# Bases de datos locales (ya que usamos Qdrant Cloud, esto es basura local)
+chroma_db_bioactives/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db

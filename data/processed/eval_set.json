@@ -1,0 +1,142 @@
+[
+    {
+        "query": "anthocyanin biosynthesis",
+        "relevant_doc_ids": [
+            "Leo M  L Nollet_ Fidel Toldrá - Handbook of analysis of active compounds in functional foods-CRC Press (2012)",
+            "fpls-14-1082245"
+        ]
+    },
+    {
+        "query": "actividad antidiabética",
+        "relevant_doc_ids": [
+            "foods-11-02755-v2",
+            "Mallappa Kumara Swamy - Plant-derived Bioactives_ Chemistry and Mode of Action-Springer Singapore_Springer (2020)"
+        ]
+    },
+    {
+        "query": "flavonoid pathway regulation",
+        "relevant_doc_ids": [
+            "ferrandino2014",
+            "s12870-019-2186-z"
+        ]
+    },
+    {
+        "query": "platelet aggregation inhibition",
+        "relevant_doc_ids": [
+            "Leo M  L Nollet_ Fidel Toldrá - Handbook of analysis of active compounds in functional foods-CRC Press (2012)",
+            "Mallappa Kumara Swamy - Plant-derived Bioactives_ Chemistry and Mode of Action-Springer Singapore_Springer (2020)"
+        ]
+    },
+    {
+        "query": "anti-inflammatory plant compounds",
+        "relevant_doc_ids": [
+            "Pati S., Sarkar T., Lahiri D. (ed.) - Recent Frontiers of Phytochemicals_ Applications in Food, Pharmacy, Cosmetics and Biotechnology-Elsevier (2023)",
+            "molecules-28-00887"
+        ]
+    },
+    {
+        "query": "antioxidant capacity phenolics",
+        "relevant_doc_ids": [
+            "delpozo-insfran2004 (1)",
+            "Pati S., Sarkar T., Lahiri D. (ed.) - Recent Frontiers of Phytochemicals_ Applications in Food, Pharmacy, Cosmetics and Biotechnology-Elsevier (2023)"
+        ]
+    },
+    {
+        "query": "metabolomic profiling fruit ripening",
+        "relevant_doc_ids": [
+            "Fruit_Metabolism_and_Metabolomics",
+            "datir-regan-2022-advances-in-physiological-transcriptomic-proteomic-metabolomic-and-molecular-genetic-approaches-for"
+        ]
+    },
+    {
+        "query": "biosynthesis of flavonols",
+        "relevant_doc_ids": [
+            "varo2021",
+            "fpls-14-1082245"
+        ]
+    },
+    {
+        "query": "antimicrobial activity natural extracts",
+        "relevant_doc_ids": [
+            "Blanca Hernández-Ledesma, Miguel Herrero - Bioactive Compounds from Marine Foods_ Plant and Animal Sources-Wiley-Blackwell (2013)",
+            "plants-14-00591-v2"
+        ]
+    },
+    {
+        "query": "polyphenol chemical structure",
+        "relevant_doc_ids": [
+            "s11101-017-9533-1",
+            "Mallappa Kumara Swamy - Plant-derived Bioactives_ Chemistry and Mode of Action-Springer Singapore_Springer (2020)"
+        ]
+    },
+    {
+        "query": "bioactive compounds grape skin",
+        "relevant_doc_ids": [
+            "molecules-25-05311",
+            "foods-11-02755-v2"
+        ]
+    },
+    {
+        "query": "LC-MS metabolite identification",
+        "relevant_doc_ids": [
+            "1-s2.0-S0023643822011422-main",
+            "Fruit_Metabolism_and_Metabolomics"
+        ]
+    },
+    {
+        "query": "enzyme inhibition plant secondary metabolites",
+        "relevant_doc_ids": [
+            "Pati S., Sarkar T., Lahiri D. (ed.) - Recent Frontiers of Phytochemicals_ Applications in Food, Pharmacy, Cosmetics and Biotechnology-Elsevier (2023)",
+            "Mallappa Kumara Swamy - Plant-derived Bioactives_ Chemistry and Mode of Action-Springer Singapore_Springer (2020)"
+        ]
+    },
+    {
+        "query": "nutraceutical potential berries",
+        "relevant_doc_ids": [
+            "choi2014",
+            "jimenez-garcia2013"
+        ]
+    },
+    {
+        "query": "postharvest physiological changes metabolites",
+        "relevant_doc_ids": [
+            "Fruit_Metabolism_and_Metabolomics",
+            "1-s2.0-S0308814616314637-main"
+        ]
+    },
+    {
+        "query": "phenolic content quantification methods",
+        "relevant_doc_ids": [
+            "Profile of Phenolic Acids",
+            "Pertuzatti2012QuantificationofSeveralBioactiveCompoundsandAntioxidantActivities"
+        ]
+    },
+    {
+        "query": "plant defense metabolites",
+        "relevant_doc_ids": [
+            "1-s2.0-S0885576516300637-am",
+            "Pati S., Sarkar T., Lahiri D. (ed.) - Recent Frontiers of Phytochemicals_ Applications in Food, Pharmacy, Cosmetics and Biotechnology-Elsevier (2023)"
+        ]
+    },
+    {
+        "query": "biosynthetic pathway transcription factors",
+        "relevant_doc_ids": [
+            "fpls-14-1082245",
+            "Leo M  L Nollet_ Fidel Toldrá - Handbook of analysis of active compounds in functional foods-CRC Press (2012)"
+        ]
+    },
+    {
+        "query": "antihypertensive plant metabolites",
+        "relevant_doc_ids": [
+            "Pati S., Sarkar T., Lahiri D. (ed.) - Recent Frontiers of Phytochemicals_ Applications in Food, Pharmacy, Cosmetics and Biotechnology-Elsevier (2023)",
+            "Blanca Hernández-Ledesma, Miguel Herrero - Bioactive Compounds from Marine Foods_ Plant and Animal Sources-Wiley-Blackwell (2013)"
+        ]
+    },
+    {
+        "query": "antidiabetic mechanism polyphenols",
+        "relevant_doc_ids": [
+            "Blueberry_Bioactive_Properties_and_Their",
+            "Pati S., Sarkar T., Lahiri D. (ed.) - Recent Frontiers of Phytochemicals_ Applications in Food, Pharmacy, Cosmetics and Biotechnology-Elsevier (2023)"
+        ]
+    }
+]

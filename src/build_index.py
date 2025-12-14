@@ -1,10 +1,17 @@
+import sys
+import os
+
+# Agregar la raíz del proyecto al sys.path para permitir importaciones absolutas (from src...)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import pandas as pd
 from pathlib import Path
-import chromadb
-from chromadb.config import Settings
-from chromadb.utils import embedding_functions
-from src.config import CHROMA_DIR, EMBEDDING_MODEL, OPENAI_API_KEY
+import uuid
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+from src.config import EMBEDDING_MODEL, OPENAI_API_KEY, QDRANT_URL, QDRANT_API_KEY
 from openai import OpenAI
+from src.schemas import ChunkMetadata
 
 # Validación de API Key
 if not OPENAI_API_KEY or OPENAI_API_KEY.strip() == "":
@@ -16,22 +23,29 @@ if not OPENAI_API_KEY or OPENAI_API_KEY.strip() == "":
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Clasificación de tipo de documento
+# -------------------------------------------------------------------------
+# Factory Pattern para creación de Metadatos
+# -------------------------------------------------------------------------
+class ChunkFactory:
+    @staticmethod
+    def _detect_doc_type(source_str: str) -> str:
+        s = source_str.lower()
+        if "bioassay" in s or "assay" in s: return "bioassay"
+        if "pubmed" in s or "abstract" in s: return "abstract"
+        if "compound" in s or "dictionary" in s: return "compound_info"
+        if "review" in s or "metabolomics" in s: return "literature_review"
+        return "unknown"
 
-
-def detect_doc_type(source_str: str) -> str:
-    s = source_str.lower()
-
-    if "bioassay" in s or "assay" in s:
-        return "bioassay"
-    if "pubmed" in s or "abstract" in s:
-        return "abstract"
-    if "compound" in s or "dictionary" in s:
-        return "compound_info"
-    if "review" in s or "metabolomics" in s:
-        return "literature_review"
-
-    return "unknown"
+    @staticmethod
+    def create_metadata(row, default_chunk_index: int) -> ChunkMetadata:
+        source = str(row["source"])
+        doc_type = ChunkFactory._detect_doc_type(source)
+        return ChunkMetadata(
+            doc_id=str(row["doc_id"]),
+            source=source,
+            doc_type=doc_type,
+            chunk_index=int(row.get("chunk_index", default_chunk_index))
+        )
 
 # Construcción del índice
 
@@ -49,33 +63,20 @@ def build_index():
     df = pd.read_parquet(chunks_path)
     print(f"Chunks cargados: {len(df)}")
 
-    # Cliente Chroma
-    client_chroma = chromadb.PersistentClient(
-        path=str(CHROMA_DIR),
-        settings=Settings(allow_reset=True),
-    )
+    # Cliente Qdrant
+    qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
-    # Embedding function consistente con retriever.py
-    ef = embedding_functions.OpenAIEmbeddingFunction(
-        api_key=OPENAI_API_KEY,
-        model_name=EMBEDDING_MODEL,
-    )
+    # Obtener dimensión del embedding para configurar la colección
+    print("Verificando dimensión del embedding...")
+    dummy_emb = client.embeddings.create(input="test", model=EMBEDDING_MODEL).data[0].embedding
+    vector_size = len(dummy_emb)
 
-    # Limpiar colección previa
-    try:
-        client_chroma.delete_collection(name="bioactives_chunks")
-        print("Colección previa 'bioactives_chunks' eliminada.")
-    except Exception as e:
-        print(
-            f"No había colección previa o no se pudo eliminar limpiamente: {e}")
-
-    # Crear colección nueva con el MISMO embedding_function que usa retriever.py
-    collection = client_chroma.create_collection(
-        name="bioactives_chunks",
-        metadata={"hnsw:space": "cosine"},
-        embedding_function=ef,
+    # Recrear colección en Qdrant
+    qdrant_client.recreate_collection(
+        collection_name="bioactives_chunks",
+        vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
     )
-    print("Colección nueva 'bioactives_chunks' creada con embedding_function OpenAI.")
+    print(f"Colección 'bioactives_chunks' recreada en Qdrant (size={vector_size}).")
 
     ids = []
     docs = []
@@ -88,21 +89,15 @@ def build_index():
         text = row["text"]
         source = row["source"]
         chunk_index = row.get("chunk_index", idx)
-
-        doc_type = detect_doc_type(str(source))
-
         unique_id = f"{doc_id}_chunk_{chunk_index}"
+
+        # Usamos la Factory para crear y validar metadatos
+        metadata_obj = ChunkFactory.create_metadata(row, idx)
 
         ids.append(unique_id)
         docs.append(text)
-        metas.append(
-            {
-                "doc_id": doc_id,
-                "source": source,
-                "doc_type": doc_type,
-                "chunk_index": int(chunk_index),
-            }
-        )
+        # Convertimos a dict para Qdrant, pero ya sabemos que es válido gracias a Pydantic
+        metas.append(metadata_obj.model_dump())
 
     # EMBEDDINGS EN BATCHES
     BATCH_SIZE = 200  # ajustable: 100, 200, 500
@@ -124,12 +119,20 @@ def build_index():
 
         vectors = [emb.embedding for emb in response.data]
 
-        # Agregar a Chroma
-        collection.add(
-            ids=batch_ids,
-            embeddings=vectors,
-            metadatas=batch_metas,
-            documents=batch_docs,
+        # Preparar puntos para Qdrant
+        points = []
+        for j, vec in enumerate(vectors):
+            # Generar UUID determinista basado en el ID original
+            point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, batch_ids[j]))
+            payload = batch_metas[j].copy()
+            payload["text"] = batch_docs[j]  # Guardar texto en payload
+
+            points.append(models.PointStruct(id=point_id, vector=vec, payload=payload))
+
+        # Subir a Qdrant
+        qdrant_client.upsert(
+            collection_name="bioactives_chunks",
+            points=points
         )
 
     print("Índice vectorial creado correctamente.")

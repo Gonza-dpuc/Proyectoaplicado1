@@ -1,6 +1,8 @@
-import chromadb
-from chromadb.utils import embedding_functions
-from src.config import OPENAI_API_KEY, EMBEDDING_MODEL, CHROMA_DIR
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+from openai import OpenAI
+from src.config import OPENAI_API_KEY, EMBEDDING_MODEL, QDRANT_URL, QDRANT_API_KEY
+from src.schemas import SearchResult, ChunkMetadata
 
 
 # -------------------------------------------------------------------------
@@ -17,20 +19,10 @@ def normalize_query(text: str) -> str:
 
 
 # -------------------------------------------------------------------------
-# Obtener siempre la colección fresca desde disco
-# (soluciona el error de Collection [UUID] does not exist)
+# Obtener cliente de Qdrant
 # -------------------------------------------------------------------------
-def get_collection():
-    client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-
-    return client.get_or_create_collection(
-        name="bioactives_chunks",
-        metadata={"hnsw:space": "cosine"},
-        embedding_function=embedding_functions.OpenAIEmbeddingFunction(
-            api_key=OPENAI_API_KEY,
-            model_name=EMBEDDING_MODEL,
-        ),
-    )
+def get_client():
+    return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
 
 # -------------------------------------------------------------------------
@@ -42,48 +34,54 @@ def retrieve(
     doc_type: str | None = None,
     source: str | None = None,
     where: dict | None = None,
-):
+) -> list[SearchResult]:
 
     normalized_query = normalize_query(query)
     if not normalized_query:
         return []
 
-    collection = get_collection()   # <==== CRÍTICO
+    # Generar embedding de la consulta
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    embedding_response = openai_client.embeddings.create(
+        input=normalized_query,
+        model=EMBEDDING_MODEL
+    )
+    query_vector = embedding_response.data[0].embedding
 
-    # Construimos diccionario de filtros
-    filters = {}
+    client = get_client()
+
+    # Construimos filtros para Qdrant
+    must_conditions = []
 
     if doc_type is not None:
-        filters["doc_type"] = doc_type
+        must_conditions.append(models.FieldCondition(key="doc_type", match=models.MatchValue(value=doc_type)))
 
     if source is not None:
-        filters["source"] = source
+        must_conditions.append(models.FieldCondition(key="source", match=models.MatchValue(value=source)))
 
     if where is not None:
-        filters.update(where)
+        for key, value in where.items():
+            must_conditions.append(models.FieldCondition(key=key, match=models.MatchValue(value=value)))
 
-    query_kwargs = {
-        "query_texts": [normalized_query],
-        "n_results": k,
-    }
-
-    if filters:
-        query_kwargs["where"] = filters
+    query_filter = models.Filter(must=must_conditions) if must_conditions else None
 
     # Ejecutar consulta
-    results = collection.query(**query_kwargs)
-
-    if not results["ids"] or len(results["ids"][0]) == 0:
-        return []
+    results = client.search(
+        collection_name="bioactives_chunks",
+        query_vector=query_vector,
+        query_filter=query_filter,
+        limit=k
+    )
 
     docs = []
-    for i in range(len(results["ids"][0])):
-        docs.append(
-            {
-                "chunk_id": results["ids"][0][i],
-                "text": results["documents"][0][i],
-                "metadata": results["metadatas"][0][i],
-                "distance": results["distances"][0][i],
-            }
-        )
+    for hit in results:
+        # Validamos que lo que viene de la DB cumpla con nuestro esquema
+        meta = ChunkMetadata(**hit.payload)
+        
+        docs.append(SearchResult(
+            chunk_id=str(hit.id),
+            text=hit.payload.get("text", ""),
+            metadata=meta,
+            distance=hit.score
+        ))
     return docs

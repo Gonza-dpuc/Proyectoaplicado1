@@ -37,6 +37,17 @@ if not OPENAI_API_KEY:
 EMBEDDING_MODEL = "text-embedding-3-small"
 
 # ---------------------------
+# Qdrant
+# ---------------------------
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+
+if not QDRANT_URL:
+    print("[WARN] QDRANT_URL no encontrado. Asegúrate de definirlo en .env")
+if not QDRANT_API_KEY:
+    print("[INFO] QDRANT_API_KEY no encontrado (puede ser opcional si usas Qdrant local sin auth).")
+
+# ---------------------------
 # Config flags
 # ---------------------------
 
@@ -49,5 +60,3 @@ if DEBUG_CONFIG:
     print("PROCESSED_DIR:", PROCESSED_DIR)
     print("CHROMA_DIR:", CHROMA_DIR)
     print("EVAL_SET_PATH:", EVAL_SET_PATH)
-
-
