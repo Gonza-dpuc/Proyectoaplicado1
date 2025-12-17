@@ -12,18 +12,24 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 # Paths (todas ABSOLUTAS)
 # ---------------------------
 
-# Carpeta donde se guardan los PDFs crudos
 RAW_DIR = ROOT_DIR / "data" / "raw"
-
-# Carpeta donde guardamos los chunks .parquet
 PROCESSED_DIR = ROOT_DIR / "data" / "processed"
 
-# Carpeta del índice Chroma (ABSOLUTA, clave para Streamlit!)
-CHROMA_DIR = ROOT_DIR / "chroma_db_bioactives"
+# Corpus intermedio (salida de tu ingesta / parsing)
+CORPUS_PATH = PROCESSED_DIR / "corpus.parquet"
 
-# Dataset de evaluación
+# Chunks separados por hito (Opción A)
+CHUNKS_HITO1_PATH = PROCESSED_DIR / "chunks_hito1.parquet"
+CHUNKS_HITO2_PATH = PROCESSED_DIR / "chunks_hito2.parquet"
+
+# (Backwards compat si alguna parte antigua usa esto)
+CHUNKS_PATH = PROCESSED_DIR / "chunks.parquet"
+
+# Dataset de evaluación (tu app puede buscar aquí)
 EVAL_SET_PATH = PROCESSED_DIR / "eval_set.json"
 
+# Carpeta del índice Chroma (si la usas)
+CHROMA_DIR = ROOT_DIR / "chroma_db_bioactives"
 
 # ---------------------------
 # Embeddings y modelo
@@ -33,7 +39,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 if not OPENAI_API_KEY:
     print("[WARN] OPENAI_API_KEY no encontrado. Ponlo en .env.")
 
-# Modelo de embeddings (ajústalo a tu necesidad)
 EMBEDDING_MODEL = "text-embedding-3-small"
 
 # ---------------------------
@@ -48,15 +53,14 @@ if not QDRANT_API_KEY:
     print("[INFO] QDRANT_API_KEY no encontrado (puede ser opcional si usas Qdrant local sin auth).")
 
 # ---------------------------
-# Config flags
+# Debug
 # ---------------------------
-
-# Para debugging: imprimir rutas usadas
 DEBUG_CONFIG = False
-
 if DEBUG_CONFIG:
     print("ROOT_DIR:", ROOT_DIR)
     print("RAW_DIR:", RAW_DIR)
     print("PROCESSED_DIR:", PROCESSED_DIR)
-    print("CHROMA_DIR:", CHROMA_DIR)
+    print("CORPUS_PATH:", CORPUS_PATH)
+    print("CHUNKS_HITO1_PATH:", CHUNKS_HITO1_PATH)
+    print("CHUNKS_HITO2_PATH:", CHUNKS_HITO2_PATH)
     print("EVAL_SET_PATH:", EVAL_SET_PATH)

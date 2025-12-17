@@ -1,36 +1,38 @@
-import pandas as pd
-from pathlib import Path
+import os
+import re
 import uuid
+from pathlib import Path
+
+import pandas as pd
+from dotenv import load_dotenv
+from openai import OpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-import os
-from openai import OpenAI
-from dotenv import load_dotenv
-import re
 
-# Cargar variables de entorno
+from src.config import CHUNKS_HITO2_PATH
+
 load_dotenv()
 
-QDRANT_URL = os.getenv("QDRANT_URL")
-if QDRANT_URL: QDRANT_URL = QDRANT_URL.strip()
+QDRANT_URL = (os.getenv("QDRANT_URL") or "").strip()
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-OPENAI_API_KEY=os.getenv("OPENAI_API_KEY")
-EMBEDDING_MODEL="text-embedding-3-small"
-COLLECTION_NAME = "bioactives_hito1"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Validación de API Key
+EMBEDDING_MODEL = "text-embedding-3-small"
+COLLECTION_NAME = "bioactives_hito2"
+
 if not OPENAI_API_KEY or OPENAI_API_KEY.strip() == "":
     raise ValueError(
-        "ERROR: OPENAI_API_KEY no está configurado.\n"
-        "Crea un archivo .env en la raíz del proyecto."
-    )
+        "ERROR: OPENAI_API_KEY no está configurado. Crea un archivo .env en la raíz.")
 
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
 
-# --- Funciones Auxiliares ---
+
+def get_uuid_from_string(s: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, s))
+
 
 def detect_doc_type(source_str: str) -> str:
-    s = source_str.lower()
+    s = (source_str or "").lower()
     if "bioassay" in s or "assay" in s:
         return "bioassay"
     if "pubmed" in s or "abstract" in s:
@@ -41,145 +43,137 @@ def detect_doc_type(source_str: str) -> str:
         return "literature_review"
     return "unknown"
 
-def get_uuid_from_string(string_id: str) -> str:
-    """
-    Qdrant requiere UUIDs o enteros para los IDs de los puntos.
-    Generamos un UUID determinista basado en tu ID original (string).
-    """
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, string_id))
 
-def extract_chemical_metadata(text: str) -> dict:
-    """Extrae m/z y RT del texto usando Regex para indexación numérica."""
+def extract_chemical_metadata(text: str):
     meta = {}
-    # Busca patrones como: m/z 449.1, mz:449.107, mass 449.1
-    mz_match = re.search(r"(?:m/z|mz|mass)\s*[:=]?\s*(\d+\.?\d*)", text, re.IGNORECASE)
+    if not isinstance(text, str) or not text:
+        return meta
+
+    mz_match = re.search(
+        r"(?:m/z|mz|mass)\s*[:=]?\s*(\d+\.?\d*)", text, re.IGNORECASE)
     if mz_match:
-        meta["mz"] = float(mz_match.group(1))
-    
-    # Busca patrones como: RT 8.2, rt:8.2 min
-    rt_match = re.search(r"(?:rt|retention time)\s*[:=]?\s*(\d+\.?\d*)", text, re.IGNORECASE)
+        try:
+            meta["mz"] = float(mz_match.group(1))
+        except ValueError:
+            pass
+
+    rt_match = re.search(
+        r"(?:rt|retention time)\s*[:=]?\s*(\d+\.?\d*)", text, re.IGNORECASE)
     if rt_match:
-        meta["rt"] = float(rt_match.group(1))
+        try:
+            meta["rt"] = float(rt_match.group(1))
+        except ValueError:
+            pass
+
     return meta
 
-# --- Construcción del índice ---
 
 def build_index():
-    print("Cargando chunks procesados...")
-    chunks_path = Path("data/processed/chunks.parquet")
+    print("[HITO2] Cargando chunks procesados...")
+    chunks_path = Path(CHUNKS_HITO2_PATH)
     if not chunks_path.exists():
-        raise FileNotFoundError(f"No existe {chunks_path}.")
+        raise FileNotFoundError(
+            f"No existe {chunks_path}. Ejecuta: python -m src.chunking")
 
     df = pd.read_parquet(chunks_path)
-    print(f"Chunks cargados: {len(df)}")
+    print(f"[HITO2] Chunks cargados: {len(df)}")
 
-    # 1. Inicializar cliente Qdrant (Soporte Cloud/Local)
+    text_col = "content" if "content" in df.columns else (
+        "text" if "text" in df.columns else None)
+    source_col = "source_file" if "source_file" in df.columns else (
+        "source" if "source" in df.columns else None)
+    if text_col is None or source_col is None:
+        raise KeyError(
+            f"Columnas inesperadas. Disponibles: {df.columns.tolist()}")
+
     client_qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
-    # 2. Re-crear la colección
-    print(f"Verificando colección '{COLLECTION_NAME}'...")
-    
-    # Verificamos si existe y la borramos para empezar de cero (igual que tu script anterior)
     if client_qdrant.collection_exists(collection_name=COLLECTION_NAME):
         client_qdrant.delete_collection(collection_name=COLLECTION_NAME)
-        print("Colección previa eliminada.")
+        print(f"[HITO2] Colección anterior '{COLLECTION_NAME}' eliminada.")
 
-    # Crear colección definiendo el tamaño del vector
-    # text-embedding-3-small y ada-002 usan 1536 dimensiones.
     client_qdrant.create_collection(
         collection_name=COLLECTION_NAME,
         vectors_config=models.VectorParams(
-            size=1536, 
-            distance=models.Distance.COSINE
-        ),
+            size=1536, distance=models.Distance.COSINE),
     )
-    print(f"Colección '{COLLECTION_NAME}' creada exitosamente.")
+    print(f"[HITO2] Colección '{COLLECTION_NAME}' creada.")
 
-    # 3. Preparar datos
+    # índices payload para filtros numéricos (self-query)
+    for field in ("mz", "rt"):
+        try:
+            client_qdrant.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name=field,
+                field_schema=models.PayloadSchemaType.FLOAT,
+            )
+        except Exception:
+            pass
+
     ids = []
-    documents_list = [] # Guardamos texto para generar embeddings
-    payloads = []       # Metadatos para Qdrant
+    documents_list = []
+    payloads = []
 
-    print("Preparando documentos y metadatos...")
+    print("[HITO2] Preparando documentos y metadatos...")
 
     for idx, row in df.iterrows():
-        doc_id = row["doc_id"]
-        text = row["text"]
-        source = row["source"]
+        doc_id = row.get("doc_id")
+        original_id = row.get("chunk_id", f"chunk_{idx}")
+
+        text = row.get(text_col, "")
+        source = row.get(source_col, "")
+
         chunk_index = row.get("chunk_index", idx)
+        total_chunks = row.get("total_chunks", None)
 
         doc_type = detect_doc_type(str(source))
-        
-        # ID original (String)
-        original_id = f"{doc_id}_chunk_{chunk_index}"
-        
-        # ID para Qdrant (UUID)
-        point_id = get_uuid_from_string(original_id)
+        point_id = get_uuid_from_string(str(original_id))
 
-        # Extraer metadatos químicos (NUEVO)
-        chem_meta = extract_chemical_metadata(text)
+        chem_meta = extract_chemical_metadata(str(text))
 
         ids.append(point_id)
-        documents_list.append(text)
-        
-        # En Qdrant, el texto del chunk va DENTRO del payload (metadata)
+        documents_list.append(str(text))
+
         payloads.append({
-            "chunk_id": original_id,       # Estandarizado (antes original_id)
-            "content": text,               # Estandarizado (antes text)
-            "source_file": os.path.basename(str(source)), # Estandarizado (antes source)
+            "chunk_id": str(original_id),
             "doc_id": doc_id,
             "doc_type": doc_type,
-            "chunk_index": int(chunk_index),
-            "mz": chem_meta.get("mz"), # Campo numérico para filtro
-            "rt": chem_meta.get("rt")  # Campo numérico para filtro
+            "chunk_index": int(chunk_index) if chunk_index is not None else 0,
+            "total_chunks": int(total_chunks) if total_chunks is not None else None,
+            "content": str(text),
+            "source_file": os.path.basename(str(source)),
+            "mz": chem_meta.get("mz"),
+            "rt": chem_meta.get("rt"),
         })
 
-    # 4. Embeddings en Batch y Subida
     BATCH_SIZE = 200
-    print(f"Generando embeddings e indexando en batches de {BATCH_SIZE}...")
-
     total_docs = len(documents_list)
-    
+    print(
+        f"[HITO2] Indexando batches de {BATCH_SIZE} (total: {total_docs})...")
+
     for i in range(0, total_docs, BATCH_SIZE):
-        batch_end = i + BATCH_SIZE
-        batch_docs = documents_list[i: batch_end]
-        batch_ids = ids[i: batch_end]
-        batch_payloads = payloads[i: batch_end]
+        batch_end = min(i + BATCH_SIZE, total_docs)
+        batch_docs = documents_list[i:batch_end]
+        batch_ids = ids[i:batch_end]
+        batch_payloads = payloads[i:batch_end]
 
-        print(f"Procesando batch {i} – {min(batch_end, total_docs)} / {total_docs}")
+        emb = client_openai.embeddings.create(
+            model=EMBEDDING_MODEL, input=batch_docs)
+        vectors = [e.embedding for e in emb.data]
 
-        try:
-            # Generar embeddings con OpenAI
-            response = client_openai.embeddings.create(
-                model=EMBEDDING_MODEL,
-                input=batch_docs,
-            )
-            vectors = [emb.embedding for emb in response.data]
+        points = [
+            models.PointStruct(
+                id=batch_ids[j], vector=vectors[j], payload=batch_payloads[j])
+            for j in range(len(batch_docs))
+        ]
 
-            # Crear estructuras de Puntos para Qdrant
-            points = [
-                models.PointStruct(
-                    id=bid,
-                    vector=vec,
-                    payload=bpay
-                )
-                for bid, vec, bpay in zip(batch_ids, vectors, batch_payloads)
-            ]
+        client_qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
+        print(f"[HITO2] Batch {i}-{batch_end} ✅")
 
-            # Subir a Qdrant (Upsert)
-            client_qdrant.upsert(
-                collection_name=COLLECTION_NAME,
-                points=points
-            )
-            
-        except Exception as e:
-            print(f"Error en el batch {i}: {e}")
-            # Opcional: break o continue dependiendo de lo estricto que quieras ser
+    print(f"[HITO2] ✅ Indexación completada en '{COLLECTION_NAME}'.")
 
-    print("Índice vectorial en Qdrant creado correctamente.")
 
-# Entry point
 if __name__ == "__main__":
-    print("=== Construcción del índice vectorial BioActives (Qdrant) ===")
+    print("=== [HITO2] Construcción del índice vectorial BioActives (Qdrant) ===")
     build_index()
-    print("=== Proceso completado ===")
+    print("=== [HITO2] Proceso completado ===")

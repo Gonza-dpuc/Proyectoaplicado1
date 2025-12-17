@@ -1,81 +1,126 @@
-from typing import List, Dict, Any, Optional
-from qdrant_client import QdrantClient, models
-from .vector_store_impl import VectorStoreImpl
-import uuid
+from typing import Dict, Any, Optional, List
+
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+
+from src.vector_store_impl import VectorStoreImpl
+
 
 class QdrantImpl(VectorStoreImpl):
-    def __init__(self, collection_name: str, url: str, api_key: Optional[str] = None):
-        # Aseguramos limpieza nuevamente dentro de la clase por seguridad
-        host = url.strip().replace("https://", "").replace("http://", "")
-        if ":" in host:
-            host = host.split(":")[0]
-            
-        print(f"-> [QdrantImpl] Host objetivo: '{host}'")
+    """
+    Implementación concreta (Bridge) para Qdrant.
+    Compatible con qdrant-client 1.16.x usando query_points().
+    """
 
-        self.client = QdrantClient(
-            host=host,    # <--- USA HOST, NO URL
-            port=6333,
-            https=True,
-            api_key=api_key,
-            timeout=60    # <--- AUMENTAMOS TIMEOUT para cargas grandes
-        )
+    def __init__(self, url: str, api_key: Optional[str], collection_name: str):
+        self.client = QdrantClient(url=url, api_key=api_key)
         self.collection_name = collection_name
-        self._ensure_collection()
+        self._collection_ready = False
 
-    def _ensure_collection(self):
-        try:
-            if not self.client.collection_exists(self.collection_name):
-                print(f"-> Creando colección '{self.collection_name}'...")
-                self.client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=models.VectorParams(size=1536, distance=models.Distance.COSINE)
-                )
-                self.client.create_payload_index(
-                    collection_name=self.collection_name,
-                    field_name="mz", 
-                    field_schema=models.PayloadSchemaType.FLOAT
-                )
-        except Exception as e:
-            print(f"⚠️ Aviso en _ensure_collection: {e}")
+    # -----------------------------
+    # Helpers
+    # -----------------------------
+    def _ensure_collection(self, vector_size: int) -> None:
+        if self._collection_ready:
+            return
 
-    def index_data(self, vectors: List[List[float]], metadata: List[Dict[str, Any]]) -> None:
-        points = []
-        for i, (vec, meta) in enumerate(zip(vectors, metadata)):
-            point_id = meta.get("chunk_id", str(uuid.uuid4()))
-            points.append(models.PointStruct(id=point_id, vector=vec, payload=meta))
-
-        # Batching interno (Sube de a 50 vectores para ser más estable)
-        batch_size = 50 
-        total_batches = (len(points) + batch_size - 1) // batch_size
-        
-        for i in range(0, len(points), batch_size):
-            batch = points[i : i + batch_size]
-            self.client.upsert(
+        existing = {c.name for c in self.client.get_collections().collections}
+        if self.collection_name not in existing:
+            self.client.create_collection(
                 collection_name=self.collection_name,
-                points=batch
+                vectors_config=models.VectorParams(
+                    size=vector_size,
+                    distance=models.Distance.COSINE,
+                ),
             )
 
-    # ... (El resto de métodos query_data y _build_filters igual que antes) ...
-    def query_data(self, query_vector: List[float], filters: Dict[str, Any], top_k: int) -> List[Dict[str, Any]]:
-        qdrant_filter = self._build_filters(filters)
-        try:
-            search_result = self.client.query_points(
-                collection_name=self.collection_name,
-                query=query_vector,
-                query_filter=qdrant_filter,
-                limit=top_k
-            ).points
-            return [hit.payload for hit in search_result]
-        except Exception as e:
-            print(f"❌ Error en query_data: {e}")
-            raise e
+        # Índices payload para filtros numéricos (no es obligatorio para funcionar, pero ayuda)
+        for field in ("mz", "rt"):
+            try:
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name=field,
+                    field_schema=models.PayloadSchemaType.FLOAT,
+                )
+            except Exception:
+                pass
+
+        self._collection_ready = True
 
     def _build_filters(self, filters: Dict[str, Any]) -> Optional[models.Filter]:
-        if not filters: return None
+        if not filters:
+            return None
+
         conditions = []
-        if "mz" in filters:
-            conditions.append(models.FieldCondition(
-                key="mz",
-                range=models.Range(gte=filters["mz"].get("gte"), lte=filters["mz"].get("lte"))
-            ))
+
+        def add_range_condition(key: str, spec: Dict[str, Any]) -> None:
+            range_kwargs = {}
+            for k in ("gte", "lte", "gt", "lt"):
+                if k in spec and spec[k] is not None:
+                    range_kwargs[k] = spec[k]
+            if not range_kwargs:
+                return
+
+            conditions.append(
+                models.FieldCondition(
+                    key=key,
+                    range=models.Range(**range_kwargs),
+                )
+            )
+
+        for key, value in filters.items():
+            if isinstance(value, dict):
+                if key in ("mz", "rt"):
+                    add_range_condition(key, value)
+            else:
+                conditions.append(
+                    models.FieldCondition(
+                        key=key,
+                        match=models.MatchValue(value=value),
+                    )
+                )
+
         return models.Filter(must=conditions) if conditions else None
+
+    # -----------------------------
+    # Bridge implementation
+    # -----------------------------
+    def index_data(self, vectors: List[List[float]], payloads: List[Dict[str, Any]]) -> None:
+        if not vectors:
+            return
+        if len(vectors) != len(payloads):
+            raise ValueError("vectors y payloads deben tener el mismo largo")
+
+        vector_size = len(vectors[0])
+        self._ensure_collection(vector_size=vector_size)
+
+        points: List[models.PointStruct] = []
+        for idx, (vec, payload) in enumerate(zip(vectors, payloads)):
+            point_id = payload.get("chunk_id") or f"pt_{idx}"
+            points.append(models.PointStruct(
+                id=point_id, vector=vec, payload=payload))
+
+        self.client.upsert(collection_name=self.collection_name, points=points)
+
+    def query_data(self, query_vector: List[float], filters: Dict[str, Any], top_k: int) -> List[Dict[str, Any]]:
+        """
+        ESTE método es el que te faltaba: query_data().
+        Si no existe (o está fuera de la clase), Python marca QdrantImpl como abstracta.
+        """
+        if not query_vector:
+            return []
+
+        self._ensure_collection(vector_size=len(query_vector))
+        q_filter = self._build_filters(filters or {})
+
+        # ✅ Qdrant 1.16.x: query_points
+        res = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_vector,
+            limit=top_k,
+            query_filter=q_filter,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        return [p.payload for p in getattr(res, "points", [])]

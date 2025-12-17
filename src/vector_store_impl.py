@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 import numpy as np
 
+
 class VectorStoreImpl(ABC):
     """
     Interfaz Bridge (Implementación): Define las operaciones de bajo nivel 

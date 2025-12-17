@@ -1,6 +1,7 @@
 import subprocess
 import streamlit as st
 
+
 def _run_step(title: str, command: str):
     """Ejecuta un comando del pipeline y muestra resultados en Streamlit."""
     with st.status(title, expanded=True) as status:

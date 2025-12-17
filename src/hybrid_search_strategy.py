@@ -1,21 +1,20 @@
-from typing import List, Dict, Any
-from .retrieval_strategy import RetrievalStrategy
-from .vector_store_service import VectorStoreService
-from .models import ProcessedChunk
+# hybrid_search_strategy.py
+from typing import Dict, Any, List, Optional
+
+from src.retrieval_strategy import RetrievalStrategy
+from src.models import ProcessedChunk
+from src.vector_store_service import VectorStoreService
+
 
 class HybridSearchStrategy(RetrievalStrategy):
-    """
-    Implementación concreta de búsqueda híbrida.
-    Fuente: Documento 04 - Retrieval y Strategy, Pag 13.
-    """
-    
-    def __init__(self, store_service: VectorStoreService):
-        # Inyección de dependencia: La estrategia usa el servicio (Bridge Abstraction)
-        self._store = store_service 
+    def __init__(self, store: VectorStoreService):
+        self.store = store
 
-    def retrieve_context(self, query: str, filters: Dict[str, Any], k: int) -> List[ProcessedChunk]:
-        print(f"-> [Strategy]: Ejecutando Búsqueda HÍBRIDA con filtros: {filters}")
-        
-        # Delegamos la complejidad técnica al servicio (Bridge)
-        # El servicio se encargará de vectorizar la query y llamar a la DB
-        return self._store.query(query_text=query, filters=filters, top_k=k)
+    def retrieve_context(
+        self,
+        query: str,
+        k: int = 5,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[ProcessedChunk]:
+        # La Abstracción (VectorStoreService) se encarga de vectorizar y consultar
+        return self.store.query_text(query_text=query, filters=filters or {}, top_k=k)

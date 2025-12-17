@@ -1,41 +1,51 @@
-# src/models.py
+# models.py
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional, Dict, Any
+
 
 class ProcessedChunk(BaseModel):
     """
-    Define la estructura de datos que fluye por todo el sistema RAG.
+    Contrato de datos del pipeline RAG.
+    - content: texto del chunk
+    - metadata: info para trazabilidad y filtros
+    - dense_vector / sparse_vector: opcionales (según estrategia)
     """
-    chunk_id: str
-    content: str
-    source_file: str
-    
-    # Metadatos flexibles. 
-    # Qdrant usará esto como "Payload".
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    
-    dense_vector: Optional[List[float]] = None
-    sparse_vector: Optional[List[float]] = None
 
-    # --- AGREGADO: VALIDACIÓN AUTOMÁTICA DE TIPOS ---
-    @field_validator('metadata')
+    # Identidad / trazabilidad (útiles para benchmark y auditoría)
+    chunk_id: Optional[str] = None
+    doc_id: Optional[str] = None
+    source_file: Optional[str] = None
+    chunk_index: Optional[int] = None
+    total_chunks: Optional[int] = None
+
+    # Contenido principal
+    content: str
+
+    # Metadata general
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    # Embeddings / representación (si aplica)
+    dense_vector: Optional[List[float]] = None
+    # ej: {"indices":[...],"values":[...]}
+    sparse_vector: Optional[Dict[str, Any]] = None
+
+    @field_validator("metadata", mode="before")
     @classmethod
-    def force_numeric_metadata(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+    def ensure_metadata_dict(cls, v):
+        return v or {}
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_mz_rt(cls, md: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Asegura que campos críticos para filtrado (mz, rt) sean floats,
-        incluso si vienen como strings desde un CSV/Parquet.
+        Si metadata incluye 'mz' o 'rt', los normaliza a float si es posible.
+        Esto es clave para filtros tipo Self-Query o filtros numéricos en DB vectorial.
         """
-        # Lista de campos que SIEMPRE deben ser numéricos para que Qdrant funcione
-        numeric_fields = ['mz', 'rt', 'mass', 'retention_time']
-        
-        for key in numeric_fields:
-            if key in v and v[key] is not None:
+        for k in ("mz", "rt"):
+            if k in md and md[k] is not None:
                 try:
-                    # Intentamos convertir a float. 
-                    # Si es "449.1" (str) -> 449.1 (float)
-                    v[key] = float(v[key])
-                except (ValueError, TypeError):
-                    # Si falla (ej: "N/A"), lo dejamos como None o lo borramos
-                    v[key] = None
-        
-        return v
+                    md[k] = float(md[k])
+                except (TypeError, ValueError):
+                    # Si no se puede convertir, lo dejamos como está
+                    pass
+        return md
