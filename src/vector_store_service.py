@@ -1,8 +1,24 @@
 import os  # <--- Necesario para limpiar la ruta
 from typing import List, Dict, Any
 from .vector_store_impl import VectorStoreImpl
+import re
 # Asegúrate de importar tu modelo de datos si lo usas, ej:
 # from .models import ProcessedChunk 
+
+def extract_chemical_metadata(text: str) -> dict:
+    """Extrae m/z y RT del texto usando Regex para indexación numérica."""
+    meta = {}
+    if not text: return meta
+    # Busca patrones como: m/z 449.1, mz:449.107, mass 449.1
+    mz_match = re.search(r"(?:m/z|mz|mass)\s*[:=]?\s*(\d+\.?\d*)", text, re.IGNORECASE)
+    if mz_match:
+        meta["mz"] = float(mz_match.group(1))
+    
+    # Busca patrones como: RT 8.2, rt:8.2 min
+    rt_match = re.search(r"(?:rt|retention time)\s*[:=]?\s*(\d+\.?\d*)", text, re.IGNORECASE)
+    if rt_match:
+        meta["rt"] = float(rt_match.group(1))
+    return meta
 
 class VectorStoreService:
     """
@@ -48,6 +64,11 @@ class VectorStoreService:
                 payload = chunk.__dict__.copy()
                 if 'dense_vector' in payload: del payload['dense_vector']
                 if 'sparse_vector' in payload: del payload['sparse_vector']
+
+            # --- ENRIQUECIMIENTO AUTOMÁTICO ---
+            # Extraemos metadatos químicos del contenido antes de subir
+            chem_meta = extract_chemical_metadata(payload.get("content", ""))
+            payload.update(chem_meta)
 
             payloads.append(payload)
 

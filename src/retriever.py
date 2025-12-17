@@ -1,87 +1,62 @@
-from qdrant_client import QdrantClient
-from qdrant_client.http import models
+import os
+from typing import List, Dict, Any
+import qdrant_client
 from openai import OpenAI
-from src.config import OPENAI_API_KEY, EMBEDDING_MODEL, QDRANT_URL, QDRANT_API_KEY
-from src.schemas import SearchResult, ChunkMetadata
+from dotenv import load_dotenv
 
+load_dotenv()
 
-# -------------------------------------------------------------------------
-# Normalización ligera de la consulta
-# -------------------------------------------------------------------------
-def normalize_query(text: str) -> str:
-    if not isinstance(text, str):
-        text = str(text)
-
-    text = text.replace("\r", " ")
-    text = text.replace("\n", " ")
-    text = " ".join(text.split())
-    return text.strip()
-
-
-# -------------------------------------------------------------------------
-# Obtener cliente de Qdrant
-# -------------------------------------------------------------------------
-def get_client():
-    return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-
-
-# -------------------------------------------------------------------------
-# Función principal de retrieval
-# -------------------------------------------------------------------------
-def retrieve(
-    query: str,
-    k: int = 5,
-    doc_type: str | None = None,
-    source: str | None = None,
-    where: dict | None = None,
-) -> list[SearchResult]:
-
-    normalized_query = normalize_query(query)
-    if not normalized_query:
-        return []
-
-    # Generar embedding de la consulta
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    embedding_response = openai_client.embeddings.create(
-        input=normalized_query,
-        model=EMBEDDING_MODEL
-    )
-    query_vector = embedding_response.data[0].embedding
-
-    client = get_client()
-
-    # Construimos filtros para Qdrant
-    must_conditions = []
-
-    if doc_type is not None:
-        must_conditions.append(models.FieldCondition(key="doc_type", match=models.MatchValue(value=doc_type)))
-
-    if source is not None:
-        must_conditions.append(models.FieldCondition(key="source", match=models.MatchValue(value=source)))
-
-    if where is not None:
-        for key, value in where.items():
-            must_conditions.append(models.FieldCondition(key=key, match=models.MatchValue(value=value)))
-
-    query_filter = models.Filter(must=must_conditions) if must_conditions else None
-
-    # Ejecutar consulta
-    results = client.search(
-        collection_name="bioactives_chunks",
-        query_vector=query_vector,
-        query_filter=query_filter,
-        limit=k
-    )
-
-    docs = []
-    for hit in results:
-        # Validamos que lo que viene de la DB cumpla con nuestro esquema
-        meta = ChunkMetadata(**hit.payload)
+class BioactivesRetriever:
+    def __init__(self, collection_name: str):
+        self.collection_name = collection_name
         
-        docs.append(SearchResult(
-            chunk_id=str(hit.id),
-            text=hit.payload.get("text", ""),
-            metadata=meta,
-            distance=hit.score
-        ))
-    return docs
+        url = os.getenv("QDRANT_URL", "http://localhost:6333")
+        if url: url = url.strip()
+        
+        # Configuración Qdrant
+        self.qdrant_client = qdrant_client.QdrantClient(
+            url=url,
+            api_key=os.getenv("QDRANT_API_KEY")
+        )
+        
+        # Configuración OpenAI (para embedder la query)
+        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+
+    def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        1. Convierte la query a vector.
+        2. Busca en Qdrant.
+        3. Retorna una lista limpia de resultados.
+        """
+        
+        # 1. Generar Embedding de la pregunta
+        # Nota: Usamos la API directa aquí para ser rápidos, pero podrías reusar tu OpenAIAdapter
+        response = self.openai_client.embeddings.create(
+            input=query,
+            model=self.embedding_model
+        )
+        query_vector = response.data[0].embedding
+
+        # 2. Buscar en Qdrant
+        # Actualización: Usamos query_points compatible con qdrant-client v1.10+
+        search_result = self.qdrant_client.query_points(
+            collection_name=self.collection_name,
+            query=query_vector,
+            limit=limit,
+            with_payload=True
+        ).points
+
+        # 3. Formatear salida para evaluación
+        formatted_results = []
+        for hit in search_result:
+            payload = hit.payload
+            formatted_results.append({
+                "content": payload.get("content") or payload.get("text"), # Fallback por si cambió el nombre
+                "source_file": payload.get("source_file") or payload.get("source"),
+                "score": hit.score,
+                "doc_type": payload.get("doc_type", "unknown"),
+                "chunk_id": payload.get("chunk_id", "unknown")
+            })
+
+        return formatted_results

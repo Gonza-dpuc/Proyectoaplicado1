@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 from openai import OpenAI
 from .retrieval_strategy import RetrievalStrategy
+import re
 
 class RAGService:
     """
@@ -14,14 +15,71 @@ class RAGService:
         # Usamos gpt-3.5-turbo por costo/velocidad, pero para ciencia gpt-4o es mejor.
         self.model_name = "gpt-3.5-turbo" 
 
-    def answer_question(self, question: str, top_k: int = 5) -> Dict[str, Any]:
+    def _extract_filters_from_query(self, query: str) -> Dict[str, Any]:
+        """Detecta intenciones de búsqueda estructurada (m/z) en lenguaje natural."""
+        filters = {}
+        # Regex para capturar m/z con tolerancia
+        mz_match = re.search(r"(?:m/z|mz|mass)\s*[:=]?\s*(\d+\.?\d*)", query, re.IGNORECASE)
+        
+        if mz_match:
+            try:
+                mz_val = float(mz_match.group(1))
+                # Definimos una ventana de tolerancia (ej: ±0.05 Da)
+                tolerance = 0.05 
+                filters["mz"] = {
+                    "gte": mz_val - tolerance,
+                    "lte": mz_val + tolerance
+                }
+                print(f"🧪 [RAG] Filtro Químico Detectado: m/z {mz_val} (±{tolerance})")
+            except ValueError:
+                pass
+        return filters
+
+    def _repack_context(self, docs: List[Any]) -> str:
+        """
+        Técnica de Repacking: Agrupa fragmentos por documento fuente para 
+        darle coherencia al LLM y ahorrar tokens de cabeceras repetidas.
+        """
+        grouped = {}
+        
+        for doc in docs:
+            # Extracción segura
+            if isinstance(doc, dict):
+                content = doc.get('content', '')
+                src = doc.get('source_file', 'Desconocido')
+            else:
+                content = getattr(doc, 'content', '')
+                src = getattr(doc, 'source_file', 'Desconocido')
+            
+            # Limpieza nombre
+            filename = src.replace("\\", "/").split("/")[-1]
+            
+            if filename not in grouped:
+                grouped[filename] = []
+            grouped[filename].append(content)
+            
+        # Construcción del texto optimizado
+        repacked_text = ""
+        for i, (filename, fragments) in enumerate(grouped.items()):
+            repacked_text += f"\n=== FUENTE {i+1}: {filename} ===\n"
+            # Unimos fragmentos del mismo paper con un separador visual
+            repacked_text += "\n(...)\n".join(fragments)
+            repacked_text += "\n"
+            
+        return repacked_text
+
+    def answer_question(self, question: str, top_k: int = 5, use_self_query: bool = True, use_repacking: bool = True, generate_response: bool = True) -> Dict[str, Any]:
         """
         Orquesta el flujo: Pregunta -> Búsqueda -> Prompt -> Respuesta
         """
         print(f"🤖 [RAG] Procesando pregunta: '{question}'")
         
-        # 1. RETRIEVAL: Conseguir la materia prima (Delegado a la estrategia seleccionada)
-        retrieved_docs = self.retriever.retrieve(question, top_k=top_k)
+        # 1. RETRIEVAL INTELIGENTE: Extraer filtros y buscar
+        filters = None
+        if use_self_query:
+            filters = self._extract_filters_from_query(question)
+            
+        retrieved_docs = self.retriever.retrieve(question, top_k=top_k, filters=filters)
 
         # Si no hay documentos, cortamos el flujo para no gastar tokens en GPT
         if not retrieved_docs:
@@ -31,41 +89,60 @@ class RAGService:
                 "context_used": []
             }
 
-        # 2. CONTEXT BUILDING: Preparar los datos para el LLM
-        # GPT necesita saber qué texto viene de qué archivo para poder citar.
-        context_text = ""
+        # Extraemos fuentes únicas para el reporte final (Lo hacemos antes por si cortamos el flujo)
         unique_sources = set()
-        
-        for i, doc in enumerate(retrieved_docs):
-            # A. Extracción segura de datos (Soporta Dict o Objeto Pydantic)
+        for doc in retrieved_docs:
             if isinstance(doc, dict):
-                content = doc.get('content', '')
                 raw_source = doc.get('source_file', 'Desconocido')
             else:
-                content = getattr(doc, 'content', '')
                 raw_source = getattr(doc, 'source_file', 'Desconocido')
-
-            # B. Limpieza del nombre del archivo (Quitar rutas largas de Windows/Linux)
-            # De "C:/Users/data/paper_maqui.pdf" a "paper_maqui.pdf"
+            
             filename = raw_source.replace("\\", "/").split("/")[-1]
             unique_sources.add(filename)
-            
-            # C. Formateo estructurado
-            # Le damos etiquetas claras al modelo: [FUENTE X]
-            context_text += f"\n--- FRAGMENTO {i+1} (Fuente: {filename}) ---\n"
-            context_text += f"{content}\n"
+
+        # Si el usuario solo quiere ver los documentos (Modo Debug/Retrieval)
+        if not generate_response:
+            return {
+                "answer": None, # Indicador de que no hubo generación
+                "sources": list(unique_sources),
+                "context_used": retrieved_docs
+            }
+
+        # 2. CONTEXT BUILDING: Preparar los datos para el LLM
+        # Usamos Repacking para organizar mejor la información
+        if use_repacking:
+            context_text = self._repack_context(retrieved_docs)
+        else:
+            # Modo simple (Concatenación plana)
+            context_text = ""
+            for i, doc in enumerate(retrieved_docs):
+                if isinstance(doc, dict):
+                    content = doc.get('content', '')
+                    src = doc.get('source_file', 'Desconocido')
+                else:
+                    content = getattr(doc, 'content', '')
+                    src = getattr(doc, 'source_file', 'Desconocido')
+                filename = src.replace("\\", "/").split("/")[-1]
+                context_text += f"\n--- FRAGMENTO {i+1} (Fuente: {filename}) ---\n{content}\n"
 
         # 3. PROMPT ENGINEERING: Las reglas del juego
         # Aquí definimos la personalidad y las restricciones.
         system_prompt = (
-            "Eres un asistente de investigación experto en fitoquímica, farmacología y alimentos funcionales. "
-            "Tu objetivo es responder preguntas basándote EXCLUSIVAMENTE en el contexto proporcionado. "
+            "Eres un asistente de investigación experto en fitoquímica, metabolómica y alimentos funcionales. "
+            "Tu objetivo es responder a las consultas sintetizando la información del contexto proporcionado de manera narrativa y coherente."
             "\n\n"
+            "INSTRUCCIONES DE GENERACIÓN:\n"
             "REGLAS OBLIGATORIAS:\n"
             "1. NO uses conocimientos previos externos. Si la respuesta no está en el contexto, di 'No cuento con información suficiente en los documentos procesados'.\n"
             "2. Sé preciso y técnico. Usa vocabulario científico (ej: menciona 'capacidad antioxidante', 'polifenoles', 'mecanismo de acción').\n"
-            "3. CITA LAS FUENTES: Cuando hagas una afirmación, intenta referenciar el archivo de origen mencionado en el contexto (ej: 'Según el estudio de maqui.pdf...').\n"
+            "3. CITA LAS FUENTES: Cuando hagas una afirmación, referencia el archivo de origen mencionado en el contexto.\n"
             "4. Si hay opiniones contradictorias en los fragmentos, menciónalas."
+            "OTRAS REGLAS:\n   "
+            "1. **Estilo Narrativo**: Redacta una respuesta fluida que integre los hallazgos. Evita formatos rígidos o listas desconectadas a menos que sea necesario para la claridad.\n"
+            "2. **Contenido**: Si la consulta es sobre una feature química (m/z, RT), explica su posible identificación y bioactividad basándote en la evidencia del contexto. Si es una pregunta teórica, desarrolla una explicación técnica.\n"
+            "3. **Uso de Evidencia**: Respalda tus afirmaciones citando las fuentes disponibles en el contexto (ej: 'Según el estudio [Archivo]...').\n"
+            "4. **Manejo de Vacíos**: Si el contexto no tiene la respuesta exacta, no digas simplemente 'no hay información'. En su lugar, explica qué información relacionada sí está disponible o resume lo que los documentos mencionan sobre el tema general.\n"
+            "5. **Tono**: Científico, preciso y profesional."
         )
 
         user_prompt = f"Contexto Científico:\n{context_text}\n\nPregunta del Usuario: {question}"

@@ -22,12 +22,6 @@ PROD_COLLECTION_NAME = "bioactives_prod"
 PROD_PDF_DIR = str(ROOT_DIR / "data" / "prod_raw")
 BATCH_SIZE_FILES = 5
 
-def clean_qdrant_url(raw_url):
-    if not raw_url: return ""
-    clean = raw_url.strip().replace("https://", "").replace("http://", "")
-    if ":" in clean: clean = clean.split(":")[0]
-    return clean.rstrip("/")
-
 def run_prod_ingestion_resume():
     print(f"🏭 INICIANDO INGESTA (MODO RESUME / NO-DUPLICADOS)")
     print("===================================================")
@@ -37,7 +31,7 @@ def run_prod_ingestion_resume():
     if not raw_url:
         print("❌ Error: Falta QDRANT_URL")
         return
-    final_host = clean_qdrant_url(raw_url)
+    raw_url = raw_url.strip()
 
     # 2. Inicializar Servicios
     try:
@@ -46,7 +40,7 @@ def run_prod_ingestion_resume():
         # Instancia para subida
         db_impl = QdrantImpl(
             collection_name=PROD_COLLECTION_NAME, 
-            url=final_host, 
+            url=raw_url, 
             api_key=os.getenv("QDRANT_API_KEY")
         )
         rag_service = VectorStoreService(db_impl=db_impl)
