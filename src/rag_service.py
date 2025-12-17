@@ -3,18 +3,21 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Union
 
 from openai import OpenAI
 
 from src.models import ProcessedChunk
-from src.retrieval_strategy import RetrievalStrategy
 
 
 class RAGService:
     """
     Servicio de alto nivel: orquesta retrieval + armado de contexto + generación.
     Mantiene compatibilidad con Streamlit vía answer_question().
+
+    Mejora clave (modo demo): si falla OpenAI (DNS/red), NO rompe la app.
+    Retorna un mensaje claro + mantiene sources/contexto.
     """
 
     def __init__(self, retriever: Any, openai_api_key: str):
@@ -28,6 +31,9 @@ class RAGService:
 
         # Modelo configurable por env var (para no hardcodear)
         self.chat_model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+
+        # Retries para fallas transitorias de red/DNS
+        self.max_generation_retries = int(os.getenv("OPENAI_GEN_RETRIES", "2"))
 
     # -----------------------------
     # Compat con tu app_streamlit.py
@@ -52,6 +58,10 @@ class RAGService:
         # Retrieval: soporta ambos contratos
         docs = self._retrieve(question, top_k=top_k, filters=filters)
 
+        # Fallback: si self-query dejó el retrieval vacío, reintentar sin filtros
+        if use_self_query and filters and (not docs or len(docs) == 0):
+            docs = self._retrieve(question, top_k=top_k, filters=None)
+
         # Normalizar a ProcessedChunk (si vienen dicts)
         chunks = [self._to_chunk(d) for d in docs]
 
@@ -60,6 +70,7 @@ class RAGService:
 
         sources = self._extract_sources(chunks)
 
+        # Modo solo retrieval
         if not generate_response:
             return {
                 "answer": "✅ Retrieval listo. (Modo: Solo Retrieval)",
@@ -70,7 +81,15 @@ class RAGService:
         context_text = self._build_context_text(chunks)
         prompt = self._build_prompt(question, context_text)
 
-        answer = self._generate_answer(prompt)
+        # ✅ Tolerante a fallas de red/DNS: no romper el demo
+        try:
+            answer = self._generate_answer_with_retry(prompt)
+        except Exception as e:
+            answer = (
+                "⚠️ No se pudo generar la respuesta por un problema de conexión con OpenAI.\n\n"
+                "✅ El retrieval sí funcionó y se muestran las fuentes/contexto recuperados.\n\n"
+                f"Detalle técnico: {type(e).__name__}: {e}"
+            )
 
         return {
             "answer": answer,
@@ -78,13 +97,13 @@ class RAGService:
             "context_used": chunks,
         }
 
-    # (Opcional) Si tu código nuevo usa answer(), lo dejamos como alias limpio
+    # (Opcional) Alias limpio
     def answer(self, question: str, top_k: int = 5, filters: Optional[Dict[str, Any]] = None) -> str:
         docs = self._retrieve(question, top_k=top_k, filters=filters)
         chunks = [self._to_chunk(d) for d in docs]
         context_text = self._build_context_text(chunks)
         prompt = self._build_prompt(question, context_text)
-        return self._generate_answer(prompt)
+        return self._generate_answer_with_retry(prompt)
 
     # -----------------------------
     # Internals
@@ -114,18 +133,17 @@ class RAGService:
 
         if mz_match:
             mz = float(mz_match.group(1))
-            filters["mz"] = {"gte": mz - 0.05, "lte": mz + 0.05}
+            filters["mz"] = {"gte": mz - 0.2, "lte": mz + 0.2}
 
         if rt_match:
             rt = float(rt_match.group(2))
-            filters["rt"] = {"gte": rt - 0.2, "lte": rt + 0.2}
+            filters["rt"] = {"gte": rt - 0.5, "lte": rt + 0.5}
 
         return filters
 
     def _to_chunk(self, d: Union[ProcessedChunk, Dict[str, Any]]) -> ProcessedChunk:
         if isinstance(d, ProcessedChunk):
             return d
-        # payload dict
         md = d.get("metadata") or {}
         return ProcessedChunk(
             chunk_id=d.get("chunk_id"),
@@ -147,7 +165,7 @@ class RAGService:
             by_source.setdefault(src, []).append(c)
 
         repacked: List[ProcessedChunk] = []
-        for src, group in by_source.items():
+        for _, group in by_source.items():
             repacked.extend(group)
         return repacked
 
@@ -169,12 +187,46 @@ class RAGService:
 
     def _build_prompt(self, question: str, context: str) -> str:
         return (
-            "Eres un asistente científico. Responde usando SOLO el contexto entregado.\n"
-            "Si el contexto no contiene la respuesta, indícalo claramente.\n\n"
+            "Eres un asistente de investigación experto en fitoquímica, metabolómica y alimentos funcionales. "
+            "Tu objetivo es responder a las consultas sintetizando la información del contexto proporcionado de manera narrativa y coherente."
+            "\n\n"
+            "INSTRUCCIONES DE GENERACIÓN:\n"
+            "REGLAS OBLIGATORIAS:\n"
+            "1. NO uses conocimientos previos externos. Si la respuesta no está en el contexto, di 'No cuento con información suficiente en los documentos procesados'.\n"
+            "2. Sé preciso y técnico. Usa vocabulario científico (ej: menciona 'capacidad antioxidante', 'polifenoles', 'mecanismo de acción').\n"
+            "3. CITA LAS FUENTES: Cuando hagas una afirmación, referencia el archivo de origen mencionado en el contexto.\n"
+            "4. Si hay opiniones contradictorias en los fragmentos, menciónalas."
+            "OTRAS REGLAS:\n   "
+            "1. **Estilo Narrativo**: Redacta una respuesta fluida que integre los hallazgos. Evita formatos rígidos o listas desconectadas a menos que sea necesario para la claridad.\n"
+            "2. **Contenido**: Si la consulta es sobre una feature química (m/z, RT), explica su posible identificación y bioactividad basándote en la evidencia del contexto. Si es una pregunta teórica, desarrolla una explicación técnica.\n"
+            "3. **Uso de Evidencia**: Respalda tus afirmaciones citando las fuentes disponibles en el contexto (ej: 'Según el estudio [Archivo]...').\n"
+            "4. **Manejo de Vacíos**: Si el contexto no tiene la respuesta exacta, no digas simplemente 'no hay información'. En su lugar, explica qué información relacionada sí está disponible o resume lo que los documentos mencionan sobre el tema general.\n"
+            "5. **Tono**: Científico, preciso y profesional."
             f"Pregunta:\n{question}\n\n"
             f"Contexto:\n{context}\n\n"
             "Respuesta:"
         )
+
+    # -----------------------------
+    # OpenAI generation (robusto)
+    # -----------------------------
+    def _generate_answer_with_retry(self, prompt: str) -> str:
+        """
+        Reintenta ante fallas transitorias (DNS/red).
+        Si la red está inestable, esto hace el demo mucho más robusto.
+        """
+        last_err = None
+        # retries + 1 intento inicial
+        for attempt in range(1, self.max_generation_retries + 2):
+            try:
+                return self._generate_answer(prompt)
+            except Exception as e:
+                last_err = e
+                # backoff exponencial simple
+                wait = min(8, 2 ** attempt)
+                time.sleep(wait)
+        # si todos fallan
+        raise last_err
 
     def _generate_answer(self, prompt: str) -> str:
         resp = self.client.chat.completions.create(
