@@ -102,7 +102,6 @@ def eval_metrics_at_k(k: int = 5, eval_set=None):
 
         retrieved_set = set(retrieved_doc_ids)
         hits = len(relevant_doc_ids & retrieved_set)
-
         num_relevant = len(relevant_doc_ids)
         num_retrieved = len(retrieved_doc_ids)
 
