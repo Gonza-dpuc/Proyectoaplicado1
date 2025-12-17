@@ -1,50 +1,28 @@
-# 🧬 Sistema RAG para Análisis de Compuestos Bioactivos
+# 🧬 Sistema RAG Avanzado para Análisis de Compuestos Bioactivos
 
-Este proyecto implementa un sistema de **Generación Aumentada por Recuperación (RAG)** diseñado para procesar, indexar y consultar literatura científica relacionada con farmacología y nutracéuticos (específicamente bayas chilenas como Maqui y Murta).
+Este proyecto implementa un sistema de **Generación Aumentada por Recuperación (RAG)** de última generación, diseñado para procesar, indexar y consultar literatura científica sobre fitoquímica, metabolómica y alimentos funcionales.
 
-El sistema permite realizar **búsquedas semánticas** sobre PDFs técnicos, recuperando fragmentos relevantes basados en vectores de embeddings.
+El sistema representa una evolución desde un modelo base (**Hito 1**) hacia una arquitectura avanzada (**Hito 2**) que incorpora estrategias de recuperación complejas para mejorar la precisión en consultas técnicas y numéricas.
 
+## 🚀 Características Principales (Hito 2)
 
+* **Ingesta Estructurada:** Procesamiento de PDFs a **Markdown** (preservando tablas y estructura) en lugar de texto plano.
+* **Estrategias de Recuperación Avanzada:**
+    *   **HyDE (Hypothetical Document Embeddings):** Genera respuestas hipotéticas para mejorar la búsqueda semántica.
+    *   **Step-Back Prompting:** Abstrae la pregunta para buscar contexto teórico.
+    *   **Decomposition:** Divide preguntas complejas en sub-consultas.
+* **Fusión y Reordenamiento:**
+    *   **Ensemble Retrieval:** Combina múltiples estrategias usando **Reciprocal Rank Fusion (RRF)**.
+    *   **Reranking:** Refina los resultados usando modelos **Cross-Encoder**.
+* **Consultas Estructuradas (Self-Query):** Detecta automáticamente filtros químicos (ej. `m/z 449.1`, `RT 8.2 min`) en lenguaje natural y los aplica a la base de datos.
+* **Dashboard Integral:** Interfaz en Streamlit para Chat, Auditoría de Ingesta, Debugging de Retrieval y Benchmarking en tiempo real.
 
-## 🚀 Características Principales
-
-* **Ingesta Inteligente:** Procesa archivos PDF, extrayendo texto y metadatos.
-* **Vectorización:** Utiliza modelos de OpenAI (`text-embedding-3-small`) para generar embeddings de alta calidad.
-* **Base de Datos Vectorial:** Integración robusta con **Qdrant Cloud**.
-* **Búsqueda Semántica:** Capacidad de encontrar relaciones conceptuales, no solo palabras clave exactas.
-* **Filtrado Avanzado:** (En desarrollo) Soporte para filtros por propiedades químicas (ej. masa/carga `m/z`).
-
-## 🧠 Pipeline de Procesamiento (Chunking y Embeddings)
-
-El núcleo de este sistema RAG reside en cómo transformamos documentos científicos densos (PDFs) en información recuperable. Utilizamos un enfoque semántico para preservar el contexto de los hallazgos químicos.
-
-
-
-### 1. Estrategia de Chunking (Segmentación)
-En lugar de cortar el texto arbitrariamente por número de caracteres, utilizamos una estrategia de **Chunking Semántico**:
-
-* **Detección de Estructura:** El sistema analiza la estructura del PDF (encabezados, párrafos) para intentar mantener secciones lógicas juntas.
-* **Split Strategy:** `semantic-local`. Esto agrupa oraciones y párrafos que tienen una fuerte relación temática, evitando cortar una frase o una fórmula química a la mitad.
-* **Metadatos:** Cada fragmento conserva su referencia al archivo origen (`source_file`) y, cuando es posible, extrae propiedades específicas como valores de masa/carga (`m/z`) para permitir filtros técnicos futuros.
-
-### 2. Modelo de Embeddings
-Una vez fragmentado el texto, convertimos el lenguaje natural en vectores numéricos:
-
-* **Modelo:** `text-embedding-3-small` (OpenAI).
-* **Dimensión:** 1536 dimensiones.
-* **Justificación:** Este modelo ofrece un equilibrio óptimo entre latencia y precisión semántica, permitiendo capturar matices en descripciones de compuestos bioactivos mejor que modelos anteriores.
-
-### 3. Almacenamiento en Qdrant
-Los vectores resultantes se indexan en **Qdrant Cloud** bajo la colección `bioactives_v1`.
-* **Vector:** Representación matemática del contenido.
-* **Payload (Carga útil):** Contiene el texto original (`content`), nombre del archivo y metadatos extraídos.
-* **Índices:** Se ha configurado indexación especial para campos numéricos (como `mz`) para acelerar búsquedas por rango.
-
-## 🛠️ Requisitos del Sistema
+## ️ Requisitos del Sistema
 
 * **Python:** 3.10 o superior.
-* **Cuenta Qdrant Cloud:** Un cluster activo.
-* **OpenAI API Key:** Créditos disponibles para embeddings.
+* **Qdrant Cloud:** Cluster activo.
+* **OpenAI API Key:** Para embeddings y generación.
+* **Google Gemini API Key:** Para la generación de datasets sintéticos de evaluación.
 
 ## 📦 Instalación
 
@@ -54,82 +32,71 @@ Los vectores resultantes se indexan en **Qdrant Cloud** bajo la colección `bioa
     cd Proyectoaplicado1
     ```
 
-2.  **Crear entorno virtual:**
+2.  **Crear entorno virtual e instalar dependencias:**
     ```bash
-    # Windows
     python -m venv .venv
-    .venv\Scripts\activate
-
-    # Mac/Linux
-    python3 -m venv .venv
-    source .venv/bin/activate
-    ```
-
-3.  **Instalar dependencias:**
-    ```bash
+    # Windows: .venv\Scripts\activate
+    # Mac/Linux: source .venv/bin/activate
     pip install -r requirements.txt
     ```
 
 ## ⚙️ Configuración (.env)
 
-⚠️ **IMPORTANTE:** La configuración de la conexión es crítica. Crea un archivo `.env` en la raíz y sigue este formato exacto para evitar errores de DNS (`getaddrinfo failed`).
+Crea un archivo `.env` en la raíz con las siguientes variables:
 
 ```env
-# API Keys
-OPENAI_API_KEY=sk-tu-clave-aqui...
-QDRANT_API_KEY=tu-api-key-de-qdrant...
+# LLM & Embeddings
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=... (Para generar datasets de evaluación)
 
-# URL de Qdrant Cloud
-# NOTA: No incluir el puerto (:6333) al final. Solo el host y protocolo.
-# Incorrecto: [https://xyz.aws.cloud.qdrant.io:6333](https://xyz.aws.cloud.qdrant.io:6333)
-# Correcto:   [https://xyz.aws.cloud.qdrant.io](https://xyz.aws.cloud.qdrant.io)
-QDRANT_URL=[https://tu-cluster-id.region.aws.cloud.qdrant.io](https://tu-cluster-id.region.aws.cloud.qdrant.io)
+# Vector Database (Qdrant)
+QDRANT_API_KEY=...
+QDRANT_URL=https://tu-cluster.qdrant.io  # Sin puerto ni espacios
+```
 
-# Configuración de la Colección
-QDRANT_COLLECTION_NAME=bioactives_v1
+## 🏃‍♂️ Uso
 
-#🏃‍♂️ Uso
-#1. Ingesta de Datos (Carga de PDFs)
+### 1. Dashboard Principal (Streamlit)
+La forma más fácil de interactuar con el sistema (Chat, Métricas, Ingesta).
+```bash
+streamlit run app_streamlit.py
+```
 
-Este script lee los PDFs de data/raw/, genera los embeddings y los sube a Qdrant.
-Bash
+### 2. Ingesta de Datos (Producción)
+Procesa PDFs desde `data/prod_raw/` hacia la colección `bioactives_prod`. Soporta "resume" (no duplica archivos) y extracción de metadatos químicos.
+```bash
+python scripts/ingest_prod.py
+```
 
-python scripts/ingest.py
+### 3. Generación de Dataset de Evaluación
+Usa Google Gemini para crear preguntas complejas (QA pairs) basadas en tus documentos para pruebas de estrés.
+```bash
+python scripts/generate_dataset_gemini.py
+```
 
-#2. Prueba de Búsqueda
+### 4. Comparación de Modelos (Benchmark)
+Ejecuta una evaluación técnica comparando Hito 1 vs Hito 2.
+```bash
+python scripts/compare_collections.py
+```
 
-Verifica que el sistema puede recuperar información relevante mediante una consulta de prueba.
-Bash
+## 📂 Estructura del Proyecto
 
-python scripts/test_search.py
-
-#📂 Estructura del Proyecto
-Plaintext
-
+```plaintext
 Proyectoaplicado1/
+├── app_streamlit.py         # Dashboard principal
 ├── data/
-│   ├── raw/                 # PDFs originales
-│   └── processed/           # Datos intermedios (chunks)
+│   ├── prod_raw/            # PDFs para producción
+│   └── synthetic_dataset... # Dataset de evaluación generado
 ├── scripts/
-│   ├── ingest.py            # Pipeline de carga y vectorización
-│   └── test_search.py       # Script de validación de búsqueda
+│   ├── ingest_prod.py       # Pipeline de ingesta oficial
+│   ├── generate_dataset...  # Generador de QA con Gemini
+│   └── compare_collections.py # Script de benchmark CLI
 ├── src/
-│   ├── qdrant_impl.py       # Lógica de conexión y manejo de Qdrant (Bridge Pattern)
-│   ├── vector_store_service.py # Lógica de negocio (Service Layer)
-│   └── models.py            # Definiciones de datos (Pydantic)
-├── .env                     # Variables de entorno (NO SUBIR A GITHUB)
-├── .gitignore               # Archivos ignorados por Git
-└── requirements.txt         # Dependencias del proyecto
-
-#🔧 Solución de Problemas Comunes
-Error: httpcore.ConnectError: [Errno 11001] getaddrinfo failed
-
-    Causa: La variable QDRANT_URL en el .env tiene el puerto :6333 al final o espacios en blanco invisibles.
-
-    Solución: Edita el .env, borra el puerto y asegúrate de eliminar espacios al final de la línea. El código en src/qdrant_impl.py incluye limpieza automática, pero es mejor tener el .env limpio.
-
-Error: AttributeError: 'QdrantClient' object has no attribute 'search'
-
-    Causa: Estás usando una versión reciente de qdrant-client (v1.10+) que eliminó el método .search().
-
-    Solución: El proyecto ya implementa query_points() que es compatible con las nuevas versiones. Asegúrate de tener las dependencias actualizadas.
+│   ├── rag_service.py       # Orquestador RAG (Generation)
+│   ├── retrieval_strategy.py # Estrategias (HyDE, RRF, Rerank)
+│   ├── vector_store_service.py # Lógica de negocio DB
+│   ├── retriever.py         # Cliente de búsqueda para benchmarks
+│   └── qdrant_impl.py       # Adaptador Qdrant
+└── requirements.txt
+```
