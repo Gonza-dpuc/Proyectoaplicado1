@@ -17,7 +17,7 @@ load_dotenv()
 
 
 # --- CONFIGURACIÓN ---
-PROD_COLLECTION_NAME = "bioactives_prod"
+PROD_COLLECTION_NAME = "bioactives_hito2"
 PROD_PDF_DIR = str(ROOT_DIR / "data" / "prod_raw")
 BATCH_SIZE_FILES = 5
 
