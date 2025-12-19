@@ -1,3 +1,4 @@
+import time
 from typing import Dict, Any, Optional, List
 
 from qdrant_client import QdrantClient
@@ -13,9 +14,25 @@ class QdrantImpl(VectorStoreImpl):
     """
 
     def __init__(self, url: str, api_key: Optional[str], collection_name: str):
+        self.url = url
         self.client = QdrantClient(url=url, api_key=api_key)
         self.collection_name = collection_name
         self._collection_ready = False
+
+    # -----------------------------
+    # Internal: Retry Logic
+    # -----------------------------
+    def _safe_api_call(self, func, *args, **kwargs):
+        """Ejecuta una llamada a Qdrant con reintentos básicos ante fallos de red."""
+        last_err = None
+        for attempt in range(3):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                last_err = e
+                # Espera exponencial breve: 1s, 2s, 3s
+                time.sleep(1 * (attempt + 1))
+        raise ConnectionError(f"No se pudo conectar a Qdrant en '{self.url}' tras 3 intentos. Detalle: {last_err}") from last_err
 
     # -----------------------------
     # Helpers
@@ -24,9 +41,13 @@ class QdrantImpl(VectorStoreImpl):
         if self._collection_ready:
             return
 
-        existing = {c.name for c in self.client.get_collections().collections}
+        # Usar llamada segura
+        resp = self._safe_api_call(self.client.get_collections)
+        existing = {c.name for c in resp.collections}
+        
         if self.collection_name not in existing:
-            self.client.create_collection(
+            self._safe_api_call(
+                self.client.create_collection,
                 collection_name=self.collection_name,
                 vectors_config=models.VectorParams(
                     size=vector_size,
@@ -37,7 +58,8 @@ class QdrantImpl(VectorStoreImpl):
         # Índices payload para filtros numéricos (no es obligatorio para funcionar, pero ayuda)
         for field in ("mz", "rt"):
             try:
-                self.client.create_payload_index(
+                self._safe_api_call(
+                    self.client.create_payload_index,
                     collection_name=self.collection_name,
                     field_name=field,
                     field_schema=models.PayloadSchemaType.FLOAT,
@@ -114,7 +136,8 @@ class QdrantImpl(VectorStoreImpl):
         q_filter = self._build_filters(filters or {})
 
         # Qdrant 1.16.x: query_points
-        res = self.client.query_points(
+        res = self._safe_api_call(
+            self.client.query_points,
             collection_name=self.collection_name,
             query=query_vector,
             limit=top_k,

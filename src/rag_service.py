@@ -76,6 +76,7 @@ class RAGService:
                 "answer": "Retrieval listo. (Modo: Solo Retrieval)",
                 "sources": sources,
                 "context_used": chunks,
+                "generated_prompt": None,
             }
 
         context_text = self._build_context_text(chunks)
@@ -95,6 +96,7 @@ class RAGService:
             "answer": answer,
             "sources": sources,
             "context_used": chunks,
+            "generated_prompt": prompt,
         }
 
     # (Opcional) Alias limpio
@@ -144,6 +146,10 @@ class RAGService:
     def _to_chunk(self, d: Union[ProcessedChunk, Dict[str, Any]]) -> ProcessedChunk:
         if isinstance(d, ProcessedChunk):
             return d
+        # Fix para Streamlit: si falla isinstance por recarga de módulos pero es objeto (no dict)
+        if not isinstance(d, dict):
+            return d
+
         md = d.get("metadata") or {}
         return ProcessedChunk(
             chunk_id=d.get("chunk_id"),
@@ -188,7 +194,7 @@ class RAGService:
     def _build_prompt(self, question: str, context: str) -> str:
         return (
             "Eres un asistente de investigación experto en fitoquímica, metabolómica y alimentos funcionales. "
-            "Tu objetivo es responder a las consultas sintetizando la información del contexto proporcionado de manera narrativa y coherente."
+            "Tu objetivo es responder a las consultas sintetizando la información del contexto proporcionado de manera breve y directa."
             "\n\n"
             "INSTRUCCIONES DE GENERACIÓN:\n"
             "REGLAS OBLIGATORIAS:\n"
@@ -197,11 +203,11 @@ class RAGService:
             "3. CITA LAS FUENTES: Cuando hagas una afirmación, referencia el archivo de origen mencionado en el contexto.\n"
             "4. Si hay opiniones contradictorias en los fragmentos, menciónalas."
             "OTRAS REGLAS:\n   "
-            "1. **Estilo Narrativo**: Redacta una respuesta fluida que integre los hallazgos. Evita formatos rígidos o listas desconectadas a menos que sea necesario para la claridad.\n"
+            "1. **Estilo Conciso**: Redacta una respuesta breve que integre los hallazgos. Evita rodeos innecesarios.\n"
             "2. **Contenido**: Si la consulta es sobre una feature química (m/z, RT), explica su posible identificación y bioactividad basándote en la evidencia del contexto. Si es una pregunta teórica, desarrolla una explicación técnica.\n"
             "3. **Uso de Evidencia**: Respalda tus afirmaciones citando las fuentes disponibles en el contexto (ej: 'Según el estudio [Archivo]...').\n"
             "4. **Manejo de Vacíos**: Si el contexto no tiene la respuesta exacta, no digas simplemente 'no hay información'. En su lugar, explica qué información relacionada sí está disponible o resume lo que los documentos mencionan sobre el tema general.\n"
-            "5. **Tono**: Científico, preciso y profesional."
+            "5. **Tono**: Científico, preciso y profesional.\n"
             f"Pregunta:\n{question}\n\n"
             f"Contexto:\n{context}\n\n"
             "Respuesta:"
@@ -232,9 +238,11 @@ class RAGService:
         resp = self.client.chat.completions.create(
             model=self.chat_model,
             messages=[
-                {"role": "system", "content": "Responde de forma concisa y basada en evidencia del contexto."},
+                {"role": "system", "content": "Responde de forma concisa, breve y directa."},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.2,
+            max_tokens=400,  # Opcional: Límite duro de tokens (aprox 300 palabras)
+            seed=42,         # <--- Determinismo para respuestas consistentes
         )
         return resp.choices[0].message.content or ""
