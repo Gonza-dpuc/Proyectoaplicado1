@@ -154,7 +154,7 @@ def eval_metrics_at_k(
 
         filters = extract_filters_from_query(query) if use_self_query else None
 
-        # ✅ Interfaz única
+        # Interfaz única
         docs = retriever.retrieve_context(query=query, k=k, filters=filters)
 
         retrieved_set = set()

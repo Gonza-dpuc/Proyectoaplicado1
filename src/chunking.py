@@ -241,7 +241,7 @@ def main() -> None:
     chunks_h2.to_parquet(CHUNKS_HITO2_PATH, index=False)
     print(f"[OK] chunks_hito2: {len(chunks_h2)} -> {CHUNKS_HITO2_PATH}")
 
-    print("\n✅ Chunking por hitos completado.")
+    print("\nChunking por hitos completado.")
 
 
 if __name__ == "__main__":

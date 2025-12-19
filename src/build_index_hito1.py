@@ -128,7 +128,7 @@ def build_index_hito1():
         client_qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
         print(f"[HITO1] Batch {i}-{batch_end} ✅")
 
-    print(f"[HITO1] ✅ Indexación completada en '{COLLECTION_NAME}'.")
+    print(f"[HITO1] Indexación completada en '{COLLECTION_NAME}'.")
 
 
 if __name__ == "__main__":

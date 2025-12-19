@@ -23,12 +23,12 @@ BATCH_SIZE_FILES = 5
 
 
 def run_prod_ingestion_resume():
-    print("🏭 INICIANDO INGESTA (MODO RESUME / NO-DUPLICADOS)")
+    print("INICIANDO INGESTA (MODO RESUME / NO-DUPLICADOS)")
     print("===================================================")
 
     raw_url = os.getenv("QDRANT_URL")
     if not raw_url:
-        print("❌ Error: Falta QDRANT_URL")
+        print("Error: Falta QDRANT_URL")
         return
     raw_url = raw_url.strip()
 
@@ -43,19 +43,19 @@ def run_prod_ingestion_resume():
         vector_service = VectorStoreService(db_impl=db_impl)
 
         client = db_impl.client
-        print("✅ Servicios conectados.")
+        print("Servicios conectados.")
     except Exception as e:
-        print(f"❌ Error inicializando: {e}")
+        print(f"Error inicializando: {e}")
         return
 
     if not os.path.exists(PROD_PDF_DIR):
-        print(f"❌ No existe carpeta: {PROD_PDF_DIR}")
+        print(f"No existe carpeta: {PROD_PDF_DIR}")
         return
 
     all_files = [f for f in os.listdir(
         PROD_PDF_DIR) if f.lower().endswith(".pdf")]
     total_files = len(all_files)
-    print(f"📚 Archivos en carpeta local: {total_files}")
+    print(f"Archivos en carpeta local: {total_files}")
 
     files_processed_count = 0
     files_skipped_count = 0
@@ -81,17 +81,17 @@ def run_prod_ingestion_resume():
                 )
 
                 if count_result.count > 0:
-                    print(f"   ⏭️ Saltando (Ya existe): {filename}")
+                    print(f"   ⏭Saltando (Ya existe): {filename}")
                     files_skipped_count += 1
                     continue
 
             except Exception as e:
                 print(
-                    f"   ⚠️ No se pudo verificar existencia de {filename}, se intentará procesar. Error: {e}")
+                    f"   No se pudo verificar existencia de {filename}, se intentará procesar. Error: {e}")
 
             file_path = os.path.join(PROD_PDF_DIR, filename)
             try:
-                print(f"   📖 Leyendo NUEVO: {filename}...")
+                print(f"   Leyendo NUEVO: {filename}...")
                 loader = DocumentLoaderFactory.get_loader(file_path)
                 chunks = loader.load_and_chunk(file_path)
 
@@ -101,34 +101,34 @@ def run_prod_ingestion_resume():
 
                 batch_chunks_to_process.extend(chunks)
             except Exception as e:
-                print(f"   ⚠️ Error leyendo {filename}: {e}")
+                print(f"   Error leyendo {filename}: {e}")
 
         if not batch_chunks_to_process:
             continue
 
         try:
             print(
-                f"   🧠 Vectorizando {len(batch_chunks_to_process)} chunks nuevos...")
+                f"   Vectorizando {len(batch_chunks_to_process)} chunks nuevos...")
             dense_vectors = openai_adapter.embed_chunks(
                 batch_chunks_to_process)
             for idx, chunk in enumerate(batch_chunks_to_process):
                 chunk.dense_vector = dense_vectors[idx]
         except Exception as e:
-            print(f"   ❌ Error vectorizando lote: {e}")
+            print(f"   Error vectorizando lote: {e}")
             continue
 
         try:
-            print("   💾 Subiendo a Qdrant...")
+            print("   Subiendo a Qdrant...")
             vector_service.index_chunks(batch_chunks_to_process)
-            print("   ✅ Nuevos datos guardados.")
+            print("   Nuevos datos guardados.")
             files_processed_count += len(batch_files)
         except Exception as e:
-            print(f"   ❌ ERROR SUBIENDO A QDRANT: {e}")
+            print(f"   ERROR SUBIENDO A QDRANT: {e}")
 
     print("\n" + "=" * 50)
     print("🏁 PROCESO FINALIZADO")
-    print(f"⏭️  Archivos Omitidos (Ya existían): {files_skipped_count}")
-    print(f"✅  Archivos Procesados (Nuevos):    {files_processed_count}")
+    print(f"⏭  Archivos Omitidos (Ya existían): {files_skipped_count}")
+    print(f"  Archivos Procesados (Nuevos):    {files_processed_count}")
     print("=" * 50)
 
 

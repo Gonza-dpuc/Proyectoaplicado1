@@ -73,7 +73,7 @@ class RAGService:
         # Modo solo retrieval
         if not generate_response:
             return {
-                "answer": "✅ Retrieval listo. (Modo: Solo Retrieval)",
+                "answer": "Retrieval listo. (Modo: Solo Retrieval)",
                 "sources": sources,
                 "context_used": chunks,
             }
@@ -81,13 +81,13 @@ class RAGService:
         context_text = self._build_context_text(chunks)
         prompt = self._build_prompt(question, context_text)
 
-        # ✅ Tolerante a fallas de red/DNS: no romper el demo
+        # Tolerante a fallas de red/DNS: no romper el demo
         try:
             answer = self._generate_answer_with_retry(prompt)
         except Exception as e:
             answer = (
-                "⚠️ No se pudo generar la respuesta por un problema de conexión con OpenAI.\n\n"
-                "✅ El retrieval sí funcionó y se muestran las fuentes/contexto recuperados.\n\n"
+                "No se pudo generar la respuesta por un problema de conexión con OpenAI.\n\n"
+                "El retrieval sí funcionó y se muestran las fuentes/contexto recuperados.\n\n"
                 f"Detalle técnico: {type(e).__name__}: {e}"
             )
 

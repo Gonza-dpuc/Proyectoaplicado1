@@ -113,7 +113,7 @@ class QdrantImpl(VectorStoreImpl):
         self._ensure_collection(vector_size=len(query_vector))
         q_filter = self._build_filters(filters or {})
 
-        # ✅ Qdrant 1.16.x: query_points
+        # Qdrant 1.16.x: query_points
         res = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
